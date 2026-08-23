@@ -4,10 +4,11 @@ services:
   jobtrackr:
     build: .
     container_name: jobtrackr
-    restart: unless-stopped
+    restart: always
     ports:
       - "5001:5001"
     environment:
+      - PYTHONUNBUFFERED=1
       - PORT=5001
       - HP_STREAM_TAILSCALE_IP=100.75.135.73
       - NTFY_TOPIC=jog_jobtrackr_alerts
@@ -15,5 +16,3 @@ services:
       - GMAIL_APP_PASS=${GMAIL_APP_PASS:-}
       - GOOGLE_SHEET_WEBHOOK_URL=${GOOGLE_SHEET_WEBHOOK_URL:-}
       - HEALTHCHECKS_PING_URL=${HEALTHCHECKS_PING_URL:-}
-    volumes:
-      - ./:/app
