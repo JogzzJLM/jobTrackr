@@ -1,0 +1,13 @@
+{
+  "last_run": "2026-08-23 10:20",
+  "total_seen_jobs": 1762,
+  "total_discovered_jobs": 881,
+  "last_new_jobs_found": 881,
+  "source_status": {
+    "Greenhouse API": "🟢 Active • 32 Target Companies Online",
+    "Lever API": "🟢 Active • 13 Target Companies Online",
+    "Ashby API": "🟢 Active • 18 Target Companies Online",
+    "SmartRecruiters API": "🟢 Active • 7 Target Companies Online",
+    "Gmail Inbox Listener": "🟢 Active • Universal Email Auto-Tracker"
+  }
+}

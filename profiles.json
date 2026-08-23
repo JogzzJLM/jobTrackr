@@ -1,0 +1,319 @@
+{
+  "active_profile_id": "prof_data",
+  "profiles": [
+    {
+      "id": "prof_swe",
+      "name": "Software Engineering",
+      "owner": "Default Profile",
+      "industry": "Software Engineering",
+      "role_keywords": [
+        "software",
+        "developer",
+        "engineer",
+        "backend",
+        "frontend",
+        "fullstack",
+        "devops",
+        "cloud",
+        "platform",
+        "systems",
+        "sre",
+        "machine learning",
+        "ai",
+        "data engineer",
+        "infrastructure",
+        "distributed",
+        "security"
+      ],
+      "level_keywords": [
+        "junior",
+        "mid",
+        "senior",
+        "lead",
+        "principal",
+        "staff",
+        "associate",
+        "engineer",
+        "entry",
+        "developer"
+      ],
+      "exclude_keywords": [
+        "intern",
+        "unpaid",
+        "volunteer",
+        "marketing",
+        "recruiter",
+        "sales",
+        "unpaid"
+      ],
+      "exclude_locations": [
+        "us government",
+        "defense tech - us",
+        "security clearance required"
+      ],
+      "skills": [
+        "python",
+        "javascript",
+        "typescript",
+        "react",
+        "node",
+        "sql",
+        "docker",
+        "aws",
+        "golang",
+        "java",
+        "c++",
+        "kubernetes",
+        "git",
+        "linux",
+        "rest"
+      ],
+      "target_locations": [
+        "london",
+        "remote",
+        "uk",
+        "hybrid",
+        "united kingdom",
+        "manchester",
+        "bristol",
+        "cambridge",
+        "oxford",
+        "edinburgh",
+        "birmingham"
+      ],
+      "sheet_webhook_url": "",
+      "sheet_csv_url": "",
+      "color_accent": "#FF8000"
+    },
+    {
+      "id": "prof_pm",
+      "name": "Project & Product Management",
+      "owner": "Uncle's Profile",
+      "industry": "Project Management",
+      "role_keywords": [
+        "project manager",
+        "program manager",
+        "product manager",
+        "scrum master",
+        "delivery manager",
+        "operations manager",
+        "agile coach",
+        "product owner",
+        "technical project manager",
+        "project coordinator",
+        "business transformation"
+      ],
+      "level_keywords": [
+        "junior",
+        "mid",
+        "senior",
+        "lead",
+        "principal",
+        "head of",
+        "director",
+        "manager",
+        "coordinator"
+      ],
+      "exclude_keywords": [
+        "intern",
+        "unpaid",
+        "software engineer",
+        "developer",
+        "coding"
+      ],
+      "exclude_locations": [
+        "us government",
+        "defense tech - us"
+      ],
+      "skills": [
+        "agile",
+        "scrum",
+        "jira",
+        "prince2",
+        "pmp",
+        "stakeholder management",
+        "kanban",
+        "roadmapping",
+        "confluence",
+        "budgeting",
+        "risk management",
+        "sdlc",
+        "governance",
+        "waterfall"
+      ],
+      "target_locations": [
+        "london",
+        "remote",
+        "uk",
+        "hybrid",
+        "united kingdom",
+        "manchester",
+        "birmingham",
+        "leeds",
+        "bristol"
+      ],
+      "sheet_webhook_url": "",
+      "sheet_csv_url": "",
+      "color_accent": "#3B82F6"
+    },
+    {
+      "id": "prof_data",
+      "name": "Data Science & Analytics",
+      "owner": "Brother's Profile",
+      "industry": "Data & Analytics",
+      "role_keywords": [
+        "data analyst",
+        "data scientist",
+        "data engineer",
+        "analytics engineer",
+        "bi analyst",
+        "business intelligence",
+        "machine learning engineer",
+        "quantitative analyst",
+        "reporting analyst",
+        "data specialist"
+      ],
+      "level_keywords": [
+        "junior",
+        "mid",
+        "senior",
+        "lead",
+        "principal",
+        "analyst",
+        "scientist",
+        "engineer",
+        "specialist"
+      ],
+      "exclude_keywords": [
+        "intern",
+        "unpaid"
+      ],
+      "exclude_locations": [
+        "us government",
+        "defense tech - us"
+      ],
+      "skills": [
+        "python",
+        "sql",
+        "tableau",
+        "power bi",
+        "snowflake",
+        "r",
+        "pandas",
+        "dbt",
+        "bigquery",
+        "spark",
+        "looker",
+        "excel",
+        "etl",
+        "machine learning"
+      ],
+      "target_locations": [
+        "london",
+        "remote",
+        "uk",
+        "hybrid",
+        "united kingdom",
+        "manchester",
+        "edinburgh",
+        "cambridge"
+      ],
+      "sheet_webhook_url": "",
+      "sheet_csv_url": "",
+      "color_accent": "#10B981"
+    },
+    {
+      "id": "prof_finance",
+      "name": "Finance & Business Operations",
+      "owner": "Finance Profile",
+      "industry": "Finance & Operations",
+      "role_keywords": [
+        "financial analyst",
+        "investment analyst",
+        "finance manager",
+        "risk analyst",
+        "accountant",
+        "operations analyst",
+        "commercial finance",
+        "strategy analyst",
+        "fp&a",
+        "portfolio analyst",
+        "credit analyst",
+        "audit"
+      ],
+      "level_keywords": [
+        "associate",
+        "analyst",
+        "senior",
+        "manager",
+        "lead",
+        "director",
+        "officer"
+      ],
+      "exclude_keywords": [
+        "intern",
+        "unpaid"
+      ],
+      "exclude_locations": [
+        "us government",
+        "defense tech - us"
+      ],
+      "skills": [
+        "excel",
+        "financial modeling",
+        "accounting",
+        "valuation",
+        "cfa",
+        "acca",
+        "powerbi",
+        "forecasting",
+        "sap",
+        "bloomberg",
+        "variance analysis",
+        "budgeting"
+      ],
+      "target_locations": [
+        "london",
+        "remote",
+        "uk",
+        "hybrid",
+        "united kingdom",
+        "london city"
+      ],
+      "sheet_webhook_url": "",
+      "sheet_csv_url": "",
+      "color_accent": "#8B5CF6"
+    },
+    {
+      "id": "prof_test_marketing",
+      "name": "Growth & Marketing",
+      "owner": "Marketing Test",
+      "industry": "Marketing",
+      "role_keywords": [
+        "growth",
+        "marketing manager",
+        "seo",
+        "content"
+      ],
+      "level_keywords": [
+        "lead",
+        "senior",
+        "manager"
+      ],
+      "skills": [
+        "analytics",
+        "google ads",
+        "hubspot",
+        "copywriting"
+      ],
+      "target_locations": [
+        "London",
+        "Remote"
+      ],
+      "exclude_keywords": [
+        "intern"
+      ],
+      "color_accent": "#EC4899"
+    }
+  ]
+}
