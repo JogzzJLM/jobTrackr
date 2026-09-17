@@ -2,7 +2,7 @@ import html
 import json
 import urllib.parse
 from config import (
-    SCRAPER_STATUS, HP_STREAM_TAILSCALE_IP, PORT,
+    SCRAPER_STATUS, APP_BASE_URL, PORT,
     get_active_profile, get_all_profiles, get_active_profile_id,
     load_hidden_jobs, load_reported_closed_jobs, load_pending_email_updates,
     load_settings, load_discovered_jobs
@@ -79,8 +79,10 @@ def render_unified_dashboard_html(active_tab="flow", selected_profile_id=None):
                     </button>
                     """
             else:
+                comp_js = comp.replace("'", "\\'").replace('"', '&quot;')
+
                 opt_btns += f"""
-                <button onclick="openLogModalForPending('{u_id}', '{comp.replace("'", "\\'")}', '{stage}')" class="btn btn-apply btn-sm" style="margin-right:6px; margin-top:6px;">
+                <button onclick="openLogModalForPending('{u_id}', '{comp_js}', '{stage}')" class="btn btn-apply btn-sm" style="margin-right:6px; margin-top:6px;">
                     + Assign to New Role in Sheet
                 </button>
                 """
@@ -317,10 +319,10 @@ def render_unified_dashboard_html(active_tab="flow", selected_profile_id=None):
                 <div style="margin-top:24px; border-top:1px solid rgba(255,255,255,0.08); padding-top:16px;">
                     <h3 style="font-size:15px; color:var(--text-white); margin-bottom:8px;">🖥️ Infrastructure Telemetry</h3>
                     <div style="font-size:13px; color:var(--text-dim); line-height:1.6;">
-                        <div>• <strong>Host:</strong> HP Stream 11 local server (Ubuntu / macOS)</div>
-                        <div>• <strong>Tailscale URL:</strong> <code>http://{HP_STREAM_TAILSCALE_IP}:{PORT}</code></div>
+                        <div>• <strong>Host:</strong> Umbrel / Portainer</div>
+                        <div>• <strong>Dashboard URL:</strong> <code>{APP_BASE_URL}</code></div>
                         <div>• <strong>GitOps Repo:</strong> <code>JogzzJLM/jobTrackr</code> (branch <code>main</code>)</div>
-                        <div>• <strong>Portainer Port:</strong> <code>5001</code> (Separate from applicationTrackr on 5000)</div>
+                        <div>• <strong>Portainer Port:</strong> <code>{PORT}</code></div>
                     </div>
                 </div>
             </div>
