@@ -6,7 +6,6 @@ import time
 _FILE_LOCK = threading.Lock()
 
 PORT = 5001
-HP_STREAM_TAILSCALE_IP = "100.75.135.73"
 
 PROFILES_FILE = "profiles.json"
 SEEN_JOBS_FILE = "seen_jobs.json"

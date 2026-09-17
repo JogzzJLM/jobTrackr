@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timedelta
 from config import (
     GMAIL_USER, GMAIL_APP_PASS, SEEN_EMAILS_FILE,
-    HP_STREAM_TAILSCALE_IP, PORT, update_source_status,
+    APP_BASE_URL, update_source_status,
     add_pending_email_update, load_pending_email_updates,
     load_json_safe, atomic_write_json, get_all_profiles,
     get_active_profile
@@ -163,7 +163,7 @@ def handle_incoming_email_update(company_name, detected_stage, subject="", from_
             tags="warning",
             priority=4,
             sound="default",
-            click_url=f"http://{HP_STREAM_TAILSCALE_IP}:{PORT}/"
+            click_url=f"http://{APP_BASE_URL}/"
         )
         print(f"  ├── ⚠️ AMBIGUOUS EMAIL SAVED: {company_name} ({len(all_matching_apps)} candidates)")
         return False

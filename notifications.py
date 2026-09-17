@@ -1,5 +1,5 @@
 import requests
-from config import NTFY_TOPIC, HP_STREAM_TAILSCALE_IP, PORT
+from config import NTFY_TOPIC, APP_BASE_URL, PORT
 
 def send_notification(title, message, tags="briefcase", priority=3, sound="default", click_url=None):
     """
@@ -9,7 +9,7 @@ def send_notification(title, message, tags="briefcase", priority=3, sound="defau
         return False
 
     if not click_url:
-        click_url = f"http://{HP_STREAM_TAILSCALE_IP}:{PORT}/"
+        click_url = f"http://{APP_BASE_URL}/"
 
     url = f"https://ntfy.sh/{NTFY_TOPIC}"
     headers = {

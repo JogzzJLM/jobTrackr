@@ -7,7 +7,7 @@ import time
 import threading
 
 from core.storage import (
-    PORT, HP_STREAM_TAILSCALE_IP, PROFILES_FILE, SEEN_JOBS_FILE,
+    PORT, PROFILES_FILE, SEEN_JOBS_FILE,
     SEEN_EMAILS_FILE, DISCOVERED_JOBS_FILE, SETTINGS_FILE,
     CLOSED_KB_FILE, REPORTED_CLOSED_FILE, CLOSED_URLS_CACHE_FILE,
     HIDDEN_JOBS_FILE, SCRAPER_STATUS_FILE, PENDING_EMAILS_FILE,
@@ -24,6 +24,11 @@ from core.storage import (
     load_scraper_status, save_scraper_status,
     load_seen_jobs, save_seen_jobs, mark_job_as_seen,
     load_discovered_jobs, save_discovered_jobs
+)
+
+APP_BASE_URL = os.getenv(
+    "APP_BASE_URL",
+    f"http://192.168.0.136:{PORT}"
 )
 
 from core.kb import (

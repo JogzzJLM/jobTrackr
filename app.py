@@ -2,7 +2,7 @@ import time
 import threading
 import sys
 import signal
-from config import PORT, HP_STREAM_TAILSCALE_IP, add_scraper_log
+from config import PORT, APP_BASE_URL, add_scraper_log
 from web.handlers import ThreadedHTTPServer, CleanHandler
 from email_listener import email_listener_loop
 from scrapers_engine.audit import run_all_scrapers, recheck_existing_open_jobs_for_closure
@@ -37,7 +37,7 @@ def main():
     print("\n" + "=" * 62)
     print(f"⚡ jobTrackr • Universal Job Discovery & Application Engine")
     print(f"🖥️ Server binding on: http://0.0.0.0:{port}")
-    print(f"🌐 Tailscale Access:  http://{HP_STREAM_TAILSCALE_IP}:{port}")
+    print(f"🌐 Tailscale Access:  http://{APP_BASE_URL}:{port}")
     print("=" * 62 + "\n")
 
     # Start Background Email Listener Thread
