@@ -15,5 +15,8 @@ services:
       - GMAIL_APP_PASS=${GMAIL_APP_PASS:-}
       - GOOGLE_SHEET_WEBHOOK_URL=${GOOGLE_SHEET_WEBHOOK_URL:-}
       - HEALTHCHECKS_PING_URL=${HEALTHCHECKS_PING_URL:-}
-    volumes:
-      - ./:/app
+  volumes:
+    - jobtrackr_data:/data
+
+volumes:
+  jobtrackr_data:
