@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 
 from config import (
     PORT, SCRAPER_STATUS, get_scraper_logs, clear_scraper_logs,
-    HP_STREAM_TAILSCALE_IP, get_all_profiles, get_active_profile_id,
+    get_all_profiles, get_active_profile_id,
     set_active_profile_id, get_active_profile, save_or_update_profile,
     delete_profile, load_settings, save_settings,
     load_hidden_jobs, hide_job,
