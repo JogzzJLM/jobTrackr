@@ -1,5 +1,5 @@
 'use strict';
-let state={jobs:[],reviews:[],profile:{},statuses:[]}, page=1, view='jobs', showDismissed=false;
+let state={jobs:[],reviews:[],profile:{},statuses:[],sources:{},scan:{},notifications:{},email_updates:[],mail:{}}, page=1, view='jobs', showDismissed=false;
 const $=id=>document.getElementById(id);
 const esc=value=>String(value??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 function safeLink(value){try{const u=new URL(value);return ['http:','https:'].includes(u.protocol)?u.href:'#';}catch{return '#';}}
