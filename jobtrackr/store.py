@@ -88,3 +88,10 @@ def atomic_write_json(path, value):
   target=Path(path);tmp=target.with_suffix(target.suffix+'.tmp');tmp.write_text(json.dumps(value));tmp.replace(target)
 
 init()
+# Optional one-time private configuration; never returned to the website.
+if os.getenv('JOBTRACKR_PROFILE_JSON'):
+ configured=json.loads(os.environ['JOBTRACKR_PROFILE_JSON'])
+ if not isinstance(configured,dict):raise ValueError('JOBTRACKR_PROFILE_JSON must be an object')
+ profile=setting('profile',DEFAULT_PROFILE).copy()
+ profile.update({k:v for k,v in configured.items() if k in DEFAULT_PROFILE})
+ set_setting('profile',profile)

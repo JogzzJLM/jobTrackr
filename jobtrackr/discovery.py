@@ -1,5 +1,6 @@
 """Diversified public employer feeds and verified, paginated graduate boards."""
 import hashlib
+import os
 import concurrent.futures
 import re
 import threading
@@ -11,6 +12,7 @@ from . import store, alerts
 from .eligibility import evaluate, displayable
 from .normalization import normalize_url, canonical_url
 from .verifier import verify_listing, plain, deadline_date
+SCAN_INTERVAL=max(300,int(os.getenv("SCRAPER_INTERVAL_SECONDS","300")))
 SCAN_LOCK=threading.Lock()
 HEADERS={'User-Agent':'Mozilla/5.0','Accept':'text/html,application/xhtml+xml'}
 
@@ -94,14 +96,15 @@ def sources():
  return [('BDO employer feed',bdo_workday),
  ('Accountancy Careers',lambda:board('Accountancy Careers','https://www.accountancycareers.co.uk/search/jobs/',r'/jobs/[^/]+/',pages=5)),
  ('Graduate-jobs.com accounting',lambda:board('Graduate-jobs.com accounting','https://www.graduate-jobs.com/jobs/accounting',r'/job/',pages=5)),
+ *[(f'Graduate-jobs.com {area}',lambda area=area:board(f'Graduate-jobs.com {area}',f'https://www.graduate-jobs.com/jobs/{area}',r'/job/',pages=5)) for area in ('finance','banking')],
+ *[(f'Reed {area}',lambda area=area:board(f'Reed {area}',f'https://www.reed.co.uk/jobs/{area}-jobs',r'/jobs/[^/]+/\d+',pages=3)) for area in ('graduate-accountant','trainee-accountant','graduate-finance')],
  ('RSM employer feed',rsm),('Sanctuary graduates',lambda:board('Sanctuary graduates','https://jobs.sanctuarygraduates.co.uk/',r'/job/',pages=5)),
  ('ACCA Careers',lambda:board('ACCA Careers','https://jobs.accaglobal.com/jobs/united-kingdom/graduate/',r'/job/',pages=3)),
  ('DWP Find a job',lambda:board('DWP Find a job','https://findajob.dwp.gov.uk/search?q=trainee+accountant&w=UK',r'/details/',pages=3)),
- *[(f'Greenhouse: {c}',lambda c=c:greenhouse(c)) for c in ('monzo','starlingbank','wise','checkout','deliveroo')],
- *[(f'Lever: {c}',lambda c=c:lever(c)) for c in ('revolut','clearscore')],
+ *[(f'Greenhouse: {c}',lambda c=c:greenhouse(c)) for c in ('monzo','wise','deliveroo')],
  *[(f'SmartRecruiters: {c}',lambda c=c:smart(c)) for c in ('EvelynPartners','ForvisMazars','Visa')]]
 
-def enrich(job,force=False):
+def _enrich(job,force=False):
  if evaluate(job)['state']=='filtered':return job,{'state':'filtered','reason':'Role or seniority outside profile'}
  check=verify_listing(job.get('verification_url') or job['link'],job['title'],force=force)
  # RSM public index/detail is employer evidence, even though its static page labels
@@ -112,6 +115,15 @@ def enrich(job,force=False):
    if main and apply and main.select_one('.job-details') and soup.title and job['title'].lower() in soup.title.get_text().lower() and len(main.get_text())>500:
     check={'state':'verified','reason':'Employer job description and specific application link','checked_at':store.now(),'title':soup.title.get_text(' ',strip=True),'description':main.get_text(' ',strip=True),'final_url':job['link']}
     job['apply_url']=apply
+  except requests.RequestException:pass
+ if check['state']=='unknown' and job['source']=='Accountancy Careers':
+  try:
+   soup=BeautifulSoup(get(job['link']).text,'html.parser');description=soup.select_one('#job-description .article-content');employer=soup.select_one('.job-detailheader a.logo-link[title]')
+   title=soup.title.get_text(' ',strip=True).lower() if soup.title else ''
+   applies=[a for a in soup.select('a[href]') if re.search(r'apply',a.get_text(' ',strip=True),re.I)]
+   content=description.get_text(' ',strip=True) if description else ''
+   if description and employer and applies and job['title'].lower() in title and len(content)>300 and not re.search(r'(vacancy (?:has )?closed|no longer accepting|applications (?:have )?closed)',content,re.I):
+    check={'state':'verified','reason':'Specific accountancy vacancy, employer, full description and apply control','checked_at':store.now(),'description':content,'final_url':job['link']}
   except requests.RequestException:pass
  if check['state']!='verified':return job,check
  if job['source']=='Sanctuary graduates':
@@ -156,6 +168,21 @@ def enrich(job,force=False):
    if node:job['description']=node.get_text(' ',strip=True)
   except requests.RequestException:pass
  return job,check
+
+_ENRICH_CACHE_LOCK=threading.RLock()
+def enrich(job,force=False):
+ cache_path=store.DATA_DIR/'enriched_listings.json';key=job['link']
+ with _ENRICH_CACHE_LOCK:cached=store.load_json_safe(cache_path,{}).get(key)
+ if cached and not force:
+  ttl=1800 if cached['check']['state'] in ('verified','closed') else 300
+  if time.time()-cached['saved_at']<ttl:return {**job,**cached['job']},dict(cached['check'])
+ result,check=_enrich(job,force=force)
+ with _ENRICH_CACHE_LOCK:
+  cache=store.load_json_safe(cache_path,{})
+  cache[key]={'saved_at':time.time(),'job':{k:v for k,v in result.items() if k not in ('status','notes','reminder','created','updated')},'check':check}
+  cache=dict(sorted(cache.items(),key=lambda item:item[1]['saved_at'],reverse=True)[:2000])
+  store.atomic_write_json(cache_path,cache)
+ return result,check
 
 def scan():
  if not SCAN_LOCK.acquire(blocking=False):return False
@@ -217,4 +244,4 @@ def loop(stop):
  last=time.time()
  while not stop.wait(60):
   alerts.scheduled()
-  if time.time()-last>=1800:scan();last=time.time()
+  if time.time()-last>=SCAN_INTERVAL:scan();last=time.time()

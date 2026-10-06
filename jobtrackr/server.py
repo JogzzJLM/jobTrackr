@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
-from . import store, discovery, alerts, mail
+from . import store, discovery, alerts, mail, sheets, flow
 from .eligibility import evaluate, displayable
 from .verifier import verify_listing
 from .normalization import normalize_url, canonical_url
@@ -25,9 +25,13 @@ class Handler(BaseHTTPRequestHandler):
   if path in ('/assets/style.css','/assets/app.js'):
    return self.reply((ROOT/path.split('/')[-1]).read_bytes(),mime='text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8')
   if path=='/api/state':
-   data={'jobs':store.jobs(),'reviews':store.reviews(),'profile':store.setting('profile'),'scan':store.setting('scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':store.STATUSES}
+   data={'jobs':store.jobs(),'scan':store.setting('scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'scan_interval':discovery.SCAN_INTERVAL,'sheet_url':sheets.edit_url(),'sheets':store.setting('sheet_health',{})}
    with store.connect() as c:data['pending_notifications']=c.execute('SELECT COUNT(*) FROM outbox WHERE delivered IS NULL').fetchone()[0]
    return self.reply(data)
+  if path=='/sankey-embed':return self.reply(flow.html(),mime='text/html; charset=utf-8')
+  if path=='/assets/plotly.js':
+   from plotly.offline import get_plotlyjs
+   return self.reply(get_plotlyjs(),mime='text/javascript; charset=utf-8')
   if path=='/api/health':return self.reply({'ok':True,'version':'finance-graduate-v1','scan':store.setting('scan',{})})
   if path.startswith('/api/history/'):
    return self.reply(store.history(path.rsplit('/',1)[-1]))
@@ -43,15 +47,6 @@ class Handler(BaseHTTPRequestHandler):
    if not 0<size<=100000:return self.reply({'error':'Invalid request size'},400)
    data=json.loads(self.rfile.read(size));path=urlparse(self.path).path
    if path=='/api/job':store.update_job(str(data.get('id','')),data)
-   elif path=='/api/profile':
-    old=store.setting('profile');allowed=set(store.DEFAULT_PROFILE)|{'award','work_experience'}
-    old.update({k:v for k,v in data.items() if k in allowed})
-    if old.get('classification') not in ('','First','2:1','2:2','Third','Pass'):raise ValueError('Invalid degree classification')
-    for k in ('graduation_year','experience_years','a_level_points'):
-     v=old.get(k)
-     if v is not None and v!='':old[k]=float(v) if k=='experience_years' else int(v)
-     else:old[k]=None
-    store.set_setting('profile',old);threading.Thread(target=discovery.scan,daemon=True).start()
    elif path=='/api/email/resolve':
     if data.get('ignore'):
      with store.connect() as c:c.execute('UPDATE email_updates SET resolved=? WHERE id=?',('ignored',str(data.get('id',''))))
@@ -61,12 +56,6 @@ class Handler(BaseHTTPRequestHandler):
     import uuid
     alerts.enqueue('test:'+str(uuid.uuid4()),'JobTrackr notifications working','This is a test. Future alerts include the role, company, location, deadline, study support and application link.');alerts.flush()
     return self.reply({'ok':store.setting('notification_health',{}).get('ok',False),'notification':store.setting('notification_health',{})})
-   elif path=='/api/review/save':
-    job=next((j for j in store.reviews() if j['link']==data.get('link')),None)
-    if not job or job.get('review_state') in ('filtered','closed'):raise ValueError('This role cannot be saved as a suitable application')
-    job['id']=hashlib.sha256(job['link'].encode()).hexdigest()[:24]
-    job['verification']={'state':'needs_check','reason':job['reason'],'checked_at':job['checked_at']}
-    store.upsert(job);store.update_job(job['id'],{'status':'Saved'})
    elif path=='/api/manual':
     url=canonical_url(str(data.get('link','')));parsed=urlparse(url)
     if parsed.scheme not in ('https','http') or not parsed.hostname:raise ValueError('Enter a full application webpage URL')
@@ -80,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
     job,check=discovery.enrich(job,force=True);decision=evaluate(job)
     if check['state']!='verified' or not displayable(decision):
      store.review(job,'; '.join(decision['requirements']) or check.get('reason','Cannot verify'),decision['state'] if decision['state']!='eligible' else check['state'])
-     return self.reply({'ok':True,'review':True,'message':'Added to Check requirements; not advertised as a verified match.'})
+     return self.reply({'ok':True,'review':True,'message':'Listing could not be confirmed as suitable, so it has not been added to Jobs.'})
     job.update(decision);job['id']=hashlib.sha256(job['link'].encode()).hexdigest()[:24]
     if store.upsert(job):alerts.new_listing(job)
     alerts.flush()
@@ -94,6 +83,7 @@ def main():
  if os.getenv('DISABLE_SCHEDULER')!='1':
   threading.Thread(target=discovery.loop,args=(stop,),daemon=True).start()
   threading.Thread(target=mail.loop,args=(stop,),daemon=True).start()
+  threading.Thread(target=sheets.loop,args=(stop,),daemon=True).start()
  print('JobTrackr finance graduate dashboard is ready',flush=True)
  try:server.serve_forever()
  finally:stop.set();server.server_close()

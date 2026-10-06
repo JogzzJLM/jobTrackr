@@ -65,6 +65,11 @@ def evaluate(job, profile=None):
    year=p.get('graduation_year')
    if not year:unknown.append('Graduation year restriction needs confirmation')
    elif not int(years.group(1))<=int(year)<=int(years.group(2) or years.group(1)):reject.append('Outside stated graduation window')
+
+ # Job boards also advertise paid training packages as vacancies.
+ if re.search(r'(training course and fees apply|course fees|one.off cost|refund.{0,30}(?:course|training)|job guarantee upon completion)',text):reject.append('Paid training package rather than an employed job')
+ if re.search(r'(?:essential.{0,100}previous experience|previous experience.{0,100}(?:essential|required)|minimum.{0,15}\d+\s*months?.{0,50}experience|seeking an experienced)',text) and p.get('experience_years') is None:
+  unknown.append('Relevant professional experience requirement needs confirmation')
  closing=deadline_date(job.get('deadline',''))
  if closing and closing<date.today():reject.append('Application deadline has passed')
  study=bool(re.search(r'\b(study support|study leave|funded.{0,30}(?:acca|aca|cima)|(?:acca|aca|cima).{0,40}(?:support|fund|training)|professional qualification|training contract)\b',text))

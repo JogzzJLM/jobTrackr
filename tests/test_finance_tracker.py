@@ -96,3 +96,48 @@ class CanonicalEmployerTests(unittest.TestCase):
   with patch('jobtrackr.discovery.verify_listing',return_value={'state':'verified','reason':'Employer description','checked_at':'now'}),patch('jobtrackr.discovery.get') as get:
    get.return_value.text='<a href="'+employer+'/apply">Apply</a><div id="job-description">Study support</div>';saved,_=enrich(job)
   self.assertEqual(saved['link'],employer);self.assertEqual(saved['verification_url'],job['verification_url'])
+
+class DiscoveryFirstTests(unittest.TestCase):
+ def test_sheet_retry_and_no_duplicate_sync_after_ack(self):
+  from jobtrackr import sheets
+  from requests import ConnectionError
+  with patch.dict(os.environ,{'GOOGLE_SHEET_WEBHOOK_URL':'https://example.org/exec','GOOGLE_SHEET_SYNC_TOKEN':'test-only'}),patch('jobtrackr.sheets.snapshot',return_value=[{'id':'sheet-test','status':'Applied'}]):
+   store.set_setting('sheet_fingerprint','')
+   with patch('jobtrackr.sheets.requests.post',side_effect=ConnectionError):self.assertFalse(sheets.sync())
+   self.assertEqual(store.setting('sheet_fingerprint'),'')
+   with patch('jobtrackr.sheets.requests.post') as post:
+    post.return_value.json.return_value={'ok':True,'count':1}
+    self.assertTrue(sheets.sync());self.assertTrue(sheets.sync());self.assertEqual(post.call_count,1)
+ def test_sheet_does_not_ack_partial_write(self):
+  from jobtrackr import sheets
+  with patch.dict(os.environ,{'GOOGLE_SHEET_WEBHOOK_URL':'https://example.org/exec','GOOGLE_SHEET_SYNC_TOKEN':'test-only'}),patch('jobtrackr.sheets.snapshot',return_value=[{'id':'partial'}]),patch('jobtrackr.sheets.requests.post') as post:
+   store.set_setting('sheet_fingerprint','');post.return_value.json.return_value={'ok':True,'count':0}
+   self.assertFalse(sheets.sync());self.assertEqual(store.setting('sheet_fingerprint'),'')
+ def test_flow_uses_recorded_transitions_without_inventing_assessment(self):
+  from jobtrackr import flow
+  job={'id':'flow-test','title':'Graduate Accountant','link':'https://example.org/jobs/flow-test'}
+  store.upsert(job);store.update_job(job['id'],{'status':'Applied'});store.update_job(job['id'],{'status':'Interview'})
+  result=flow.counts([{'id':job['id'],'status':'Interview'}])
+  self.assertEqual(result[('Applications','Applied')],1);self.assertEqual(result[('Applied','Interview')],1);self.assertNotIn(('Applied','Assessment'),result)
+ def test_accountancy_custom_page_needs_apply_control(self):
+  from jobtrackr.discovery import enrich
+  job={'title':'Graduate Trainee','company':'Firm','location':'London, UK','link':'https://www.accountancycareers.co.uk/jobs/firm-graduate/','source':'Accountancy Careers','description':''}
+  markup='<title>Graduate Trainee | Firm</title><header class="job-detailheader"><a class="logo-link" title="Firm"></a></header><section id="job-description"><div class="article-content">'+'Training in accounting. '*30+'</div></section>'
+  with patch('jobtrackr.discovery.verify_listing',return_value={'state':'unknown'}),patch('jobtrackr.discovery.get') as get:
+   get.return_value.text=markup;self.assertEqual(enrich(job.copy(),force=True)[1]['state'],'unknown')
+   get.return_value.text=markup+'<a href="https://example.org/apply">Apply now</a>';self.assertEqual(enrich(job.copy(),force=True)[1]['state'],'verified')
+
+ def test_enrichment_cache_reuses_page_but_not_application_notes(self):
+  from jobtrackr import discovery
+  job={'title':'Graduate Accountant','link':'https://example.org/jobs/cache-test','source':'Employer'}
+  with patch('jobtrackr.discovery._enrich',return_value=({**job,'description':'Employer detail'}, {'state':'verified'})) as fetch:
+   discovery.enrich(job,force=True)
+   second,check=discovery.enrich({**job,'notes':'Current private notes'})
+   self.assertEqual(fetch.call_count,1);self.assertEqual(second['notes'],'Current private notes');self.assertEqual(check['state'],'verified')
+
+ def test_paid_training_ad_is_not_a_job(self):
+  result=evaluate({'title':'Trainee Accountant','company':'Training provider','location':'London, UK','description':'Job guarantee upon completion. This is a training course and fees apply.'})
+  self.assertEqual(result['state'],'filtered')
+ def test_unquantified_essential_experience_is_not_assumed(self):
+  result=evaluate({'title':'Finance Assistant','location':'London, UK','description':'Skills and experience essential: Previous experience in a finance assistant role.'})
+  self.assertEqual(result['state'],'needs_check')

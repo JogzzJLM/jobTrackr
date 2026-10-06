@@ -140,7 +140,7 @@ def verify_listing(url, expected_title='', force=False):
         cached = load_json_safe(CACHE_FILE, {}).get(url)
     if cached and not force:
         age = time.time() - cached.get('saved_at', 0)
-        ttl = 6 * 3600 if cached.get('state') == 'verified' else 30 * 60
+        ttl = 30 * 60 if cached.get('state') == 'verified' else 5 * 60
         if age < ttl: return dict(cached)
     result = _check(url, expected_title)
     result['saved_at'] = time.time()
