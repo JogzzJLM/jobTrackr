@@ -1,29 +1,28 @@
-version: "3.8"
-
 services:
   jobtrackr:
     build: .
     container_name: jobtrackr
     restart: unless-stopped
-
     ports:
       - "5001:5001"
-
     environment:
       PORT: "5001"
       APP_BASE_URL: "${APP_BASE_URL:-http://192.168.0.136:5001}"
-
-      GMAIL_USER: "${GMAIL_USER:-}"
-      GMAIL_APP_PASS: "${GMAIL_APP_PASS:-}"
-      GOOGLE_SHEET_WEBHOOK_URL: "${GOOGLE_SHEET_WEBHOOK_URL:-}"
-      HEALTHCHECKS_PING_URL: "${HEALTHCHECKS_PING_URL:-}"
-      NTFY_TOPIC: "${NTFY_TOPIC:-}"
-
+      NTFY_TOPIC: "${NTFY_TOPIC:-applicationtrackr_alerts_har}"
+      NTFY_BASE_URL: "${NTFY_BASE_URL:-https://ntfy.sh}"
+      NTFY_TOKEN: "${NTFY_TOKEN:-}"
+      JOBTRACKR_IMAP_HOST: "${JOBTRACKR_IMAP_HOST:-imap.gmail.com}"
+      JOBTRACKR_IMAP_USER: "${JOBTRACKR_IMAP_USER:-}"
+      JOBTRACKR_IMAP_PASSWORD: "${JOBTRACKR_IMAP_PASSWORD:-}"
       DATA_DIR: "/data"
       PYTHONUNBUFFERED: "1"
-
     volumes:
       - jobtrackr_data:/data
-
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 volumes:
   jobtrackr_data:

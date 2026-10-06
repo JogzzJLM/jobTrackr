@@ -6,3 +6,5 @@ venv/
 .DS_Store
 .env
 sankey_diagram*.html
+
+data/

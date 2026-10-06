@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__
+*.pyc
+.env
+data
+profiles.json
+seen_jobs.json
+discovered_jobs.json
+closed_urls_cache.json
+sankey_diagram*.html
