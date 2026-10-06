@@ -103,7 +103,7 @@ def sources():
 
 def enrich(job,force=False):
  if evaluate(job)['state']=='filtered':return job,{'state':'filtered','reason':'Role or seniority outside profile'}
- check=verify_listing(job['link'],job['title'],force=force)
+ check=verify_listing(job.get('verification_url') or job['link'],job['title'],force=force)
  # RSM public index/detail is employer evidence, even though its static page labels
  # the apply link by URL rather than the word “Apply”.
  if check['state']=='unknown' and urlparse(job['link']).hostname=='www.rsmuk.com':
@@ -149,7 +149,10 @@ def enrich(job,force=False):
  # Pull only the job's description, not recommendations, navigation or footer.
  if job['source']=='BDO graduates':
   try:
-   soup=BeautifulSoup(get(job['link']).text,'html.parser');node=soup.select_one('.job-description, .ats-description, #job-description')
+   soup=BeautifulSoup(get(job.get('verification_url') or job['link']).text,'html.parser');node=soup.select_one('.job-description, .ats-description, #job-description')
+   apply=next((a['href'] for a in soup.select('a[href]') if urlparse(a['href']).hostname=='bdouk.wd3.myworkdayjobs.com' and '/job/' in a['href']),None)
+   if apply:
+    job['verification_url']=job.get('verification_url') or job['link'];job['apply_url']=apply;job['link']=canonical_url(apply).removesuffix('/apply')
    if node:job['description']=node.get_text(' ',strip=True)
   except requests.RequestException:pass
  return job,check

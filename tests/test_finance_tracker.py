@@ -87,3 +87,12 @@ class SourceFallbackTests(unittest.TestCase):
   from jobtrackr.discovery import bdo_workday
   with patch('jobtrackr.discovery._bdo_workday',side_effect=__import__('requests').HTTPError),patch('jobtrackr.discovery.board',return_value=[{'title':'Graduate Accountant'}]) as fallback:
    self.assertEqual(len(bdo_workday()),1);self.assertIn('careers.bdo.co.uk',fallback.call_args.args[1])
+
+class CanonicalEmployerTests(unittest.TestCase):
+ def test_bdo_marketing_and_feed_share_employer_identity(self):
+  from jobtrackr.discovery import enrich
+  job={'company':'BDO','title':'Graduate Accountant','location':'London','link':'https://careers.bdo.co.uk/en/job/london/accountant/1469/1','source':'BDO graduates'}
+  employer='https://bdouk.wd3.myworkdayjobs.com/BDO_Early_in_Career/job/London/Graduate_123'
+  with patch('jobtrackr.discovery.verify_listing',return_value={'state':'verified','reason':'Employer description','checked_at':'now'}),patch('jobtrackr.discovery.get') as get:
+   get.return_value.text='<a href="'+employer+'/apply">Apply</a><div id="job-description">Study support</div>';saved,_=enrich(job)
+  self.assertEqual(saved['link'],employer);self.assertEqual(saved['verification_url'],job['verification_url'])
