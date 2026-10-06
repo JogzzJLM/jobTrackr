@@ -28,7 +28,7 @@ class FinanceTests(unittest.TestCase):
   profile={**store.DEFAULT_PROFILE,'gcse_maths':'3','gcse_english':'5'};self.assertEqual(evaluate(self.job(description='GCSEs at grade 4 in Maths and English.'),profile)['state'],'filtered')
  def test_unrelated_role_filtered(self):self.assertEqual(evaluate(self.job(title='Graduate Software Engineer'))['state'],'filtered')
  def test_student_placement_filtered(self):self.assertEqual(evaluate(self.job(title='Finance Industrial Placement'))['state'],'filtered')
- def test_country_not_assumed(self):self.assertEqual(evaluate(self.job(location='New York, US'))['state'],'needs_check')
+ def test_country_not_assumed(self):self.assertEqual(evaluate(self.job(location='New York, US'))['state'],'filtered')
  def test_passed_deadline_filtered(self):self.assertEqual(evaluate(self.job(deadline='2020-01-01'))['state'],'filtered')
  def test_unknown_acca_not_claimed(self):self.assertEqual(evaluate(self.job(description='You must be currently studying ACCA.'))['state'],'needs_check')
  def test_rescrape_keeps_notes_stage_and_history(self):
@@ -81,3 +81,9 @@ class MailboxTests(unittest.TestCase):
   from jobtrackr import mail
   with patch.dict(os.environ,{'JOBTRACKR_IMAP_USER':'','JOBTRACKR_IMAP_PASSWORD':''}),patch('jobtrackr.mail.imaplib.IMAP4_SSL') as connection:mail.poll();connection.assert_not_called()
   self.assertFalse(store.setting('mail_health')['connected'])
+
+class SourceFallbackTests(unittest.TestCase):
+ def test_workday_failure_uses_real_employer_pages(self):
+  from jobtrackr.discovery import bdo_workday
+  with patch('jobtrackr.discovery._bdo_workday',side_effect=__import__('requests').HTTPError),patch('jobtrackr.discovery.board',return_value=[{'title':'Graduate Accountant'}]) as fallback:
+   self.assertEqual(len(bdo_workday()),1);self.assertIn('careers.bdo.co.uk',fallback.call_args.args[1])

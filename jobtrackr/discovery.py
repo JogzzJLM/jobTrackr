@@ -37,7 +37,7 @@ def board(name,url,pattern,company='',pages=5):
  return result
 
 
-def bdo_workday():
+def _bdo_workday():
  result=[];offset=0
  for _ in range(10):
   r=requests.post('https://bdouk.wd3.myworkdayjobs.com/wday/cxs/bdouk/BDO_Early_in_Career/jobs',headers=HEADERS,json={'appliedFacets':{},'limit':20,'offset':offset,'searchText':'graduate'},timeout=20);r.raise_for_status();page=r.json();items=page.get('jobPostings',[])
@@ -46,6 +46,12 @@ def bdo_workday():
   offset+=len(items)
   if not items or offset>=page.get('total',offset):break
  return result
+
+def bdo_workday():
+ try:return _bdo_workday()
+ except (requests.RequestException,ValueError):
+  # Workday can block the home-server IP while its employer careers pages work.
+  return board('BDO graduates','https://careers.bdo.co.uk/en/search-jobs/graduate/',r'/job/','BDO',5)
 
 def rsm():
  data=[];offset=0
@@ -122,6 +128,21 @@ def enrich(job,force=False):
   except requests.RequestException:pass
  for key in ('title','company','location','country','description','published_at'):
   if check.get(key):job[key]=check[key]
+ if job['source']=='Accountancy Careers':
+  try:
+   soup=BeautifulSoup(get(job['link']).text,'html.parser');facts={}
+   for li in soup.select('.meta-infolist li'):
+    field=li.select_one('.fieldname')
+    if field:facts[field.get_text(' ',strip=True).strip(': ').lower()]=li.get_text(' ',strip=True).replace(field.get_text(' ',strip=True),'',1).strip()
+   if facts.get('location'):job['location']=facts['location']
+   if facts.get('salary'):job['salary']=facts['salary']
+   if facts.get('deadline'):check['closing_date']=facts['deadline']
+   employer=soup.select_one('.job-detailheader a.logo-link[title]')
+   if employer:job['company']=employer['title']
+   description=soup.select_one('#job-description .article-content')
+   if description:job['description']=description.get_text(' ',strip=True)
+   if 'school leaver' in facts.get('job type','').lower():job['title']='School Leaver '+job['title']
+  except requests.RequestException:pass
  job['deadline']=(deadline_date(check.get('closing_date') or job.get('deadline')) or '')
  if job['deadline']:job['deadline']=job['deadline'].isoformat()
  job['verification']={k:check.get(k) for k in ('state','reason','checked_at')}

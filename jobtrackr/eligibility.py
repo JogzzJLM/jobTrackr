@@ -9,7 +9,7 @@ CATEGORIES = {
  'Audit': ('audit','assurance'), 'Tax': ('tax','taxation'),
  'Finance': ('finance','financial analyst','financial planning','fp&a','treasury','credit analyst','investment analyst','risk analyst','banking','wealth management','portfolio analyst','valuation'),
  'Payroll': ('payroll',)}
-UK_WORDS=('united kingdom','england','scotland','wales','northern ireland','london','bristol','birmingham','manchester','leeds','nottingham','edinburgh','glasgow','reading','oxford','aylesbury','belfast','newcastle','cambridge','southampton','liverpool','leicester','milton keynes','sheffield','gatwick','crawley','aberdeen','cardiff','cheltenham','ipswich','guildford','norwich','dundee','exeter','brighton')
+UK_WORDS=('united kingdom','england','scotland','wales','northern ireland','london','bristol','birmingham','manchester','leeds','nottingham','edinburgh','glasgow','reading','oxford','aylesbury','belfast','newcastle','cambridge','southampton','liverpool','leicester','milton keynes','sheffield','gatwick','crawley','aberdeen','cardiff','cheltenham','ipswich','guildford','norwich','dundee','exeter','brighton','rickmansworth','st albans','colchester','fakenham','diss')
 
 def evaluate(job, profile=None):
  p=profile or setting('profile');title=job.get('title','').lower();description=job.get('description','').lower();text=title+' '+description
@@ -21,6 +21,9 @@ def evaluate(job, profile=None):
  if re.search(r'\b(placement|school leaver|insight|penultimate|undergraduate internship|summer intern)\b',title):reject.append('Student or school-leaver programme')
  if re.search(r'\b(sales|recruiter|software|developer|engineer|actuarial)\b',title):reject.append('Outside graduate accounting and finance scope')
  loc=(job.get('location','')+' '+job.get('country','')).lower()
+ country=job.get('country','').strip().lower()
+ if country and country not in ('gb','gbr','uk','united kingdom','england','scotland','wales','northern ireland'):reject.append('Role is outside the UK')
+ elif re.search(r'\b(united states|usa|canada|australia|germany|france|netherlands|singapore|dubai|new york)\b',loc):reject.append('Role is outside the UK')
  if not (re.search(r'\b(uk|gb|gbr)\b',loc) or any(w in loc for w in UK_WORDS)):unknown.append('UK location not confirmed')
  early=bool(re.search(r'\b(graduate|trainee|junior|entry.level|assistant|apprentice|apprenticeship)\b',title))
  if not early and not re.search(r'\b(no (?:prior )?experience|entry.level|recent graduate|full training|graduates welcome)\b',description):unknown.append('Entry-level suitability not confirmed')
