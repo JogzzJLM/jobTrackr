@@ -67,3 +67,17 @@ class EmailMatchingTests(unittest.TestCase):
  def test_unknown_school_visible_with_explicit_check(self):
   from jobtrackr.eligibility import displayable
   self.assertTrue(displayable({'state':'needs_check','requirements':['UCAS points requirement needs confirmation']}));self.assertFalse(displayable({'state':'needs_check','requirements':['Existing ACCA enrolment required or unclear']}))
+
+class MailboxTests(unittest.TestCase):
+ def test_mock_mailbox_read_only_and_updates_specific_job_once(self):
+  from jobtrackr import mail
+  job={'id':'mail-persist','company':'Example Finance','title':'Graduate Accountant','link':'https://example.org/jobs/mail-persist','location':'London'}
+  store.upsert(job);store.update_job(job['id'],{'status':'Applied','notes':'Keep my notes'})
+  raw=b'From: Recruitment <hr@example.org>\r\nSubject: Interview invitation\r\nContent-Type: text/plain\r\n\r\nWe invite you to interview for https://example.org/jobs/mail-persist'
+  with patch.dict(os.environ,{'JOBTRACKR_IMAP_USER':'example@example.org','JOBTRACKR_IMAP_PASSWORD':'test-only'}),patch('jobtrackr.mail.imaplib.IMAP4_SSL') as connection:
+   client=connection.return_value;client.response.return_value=('UIDVALIDITY',[b'991']);client.uid.side_effect=[('OK',[b'77']),('OK',[(b'header',raw)]),('OK',[b'77'])];mail.poll();mail.poll();client.select.assert_called_with('INBOX',readonly=True);self.assertEqual(client.uid.call_args_list[1].args[-1],'(BODY.PEEK[])')
+  saved=next(j for j in store.jobs() if j['id']==job['id']);self.assertEqual(saved['status'],'Interview');self.assertIn('Keep my notes',saved['notes']);self.assertEqual(len(store.history(job['id'])),3)
+ def test_missing_mailbox_does_not_connect(self):
+  from jobtrackr import mail
+  with patch.dict(os.environ,{'JOBTRACKR_IMAP_USER':'','JOBTRACKR_IMAP_PASSWORD':''}),patch('jobtrackr.mail.imaplib.IMAP4_SSL') as connection:mail.poll();connection.assert_not_called()
+  self.assertFalse(store.setting('mail_health')['connected'])
