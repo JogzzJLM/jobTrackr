@@ -1,4 +1,5 @@
 // One-time setup: bind this script to a separate JobTrackr sheet.
+// Set Script Property JOBTRACKR_SPREADSHEET_ID to the target spreadsheet ID.
 // Set Script Property JOBTRACKR_SYNC_TOKEN to the same secret as the stack.
 // Deploy as a web app, execute as yourself, allow access to Anyone.
 // The endpoint authenticates every request with that private token.
@@ -10,7 +11,9 @@ function doPost(e) {
     const token = PropertiesService.getScriptProperties().getProperty('JOBTRACKR_SYNC_TOKEN');
     if (!token || data.token !== token) throw new Error('Not authorised');
     if (!Array.isArray(data.jobs)) throw new Error('Invalid records');
-    const book = SpreadsheetApp.getActiveSpreadsheet();
+    const id = PropertiesService.getScriptProperties().getProperty('JOBTRACKR_SPREADSHEET_ID');
+    if (!id) throw new Error('Spreadsheet is not configured');
+    const book = SpreadsheetApp.openById(id);
     const sheet = book.getSheetByName('JobTrackr') || book.insertSheet('JobTrackr');
     const fields = ['id','company','title','location','link','status','notes','reminder','deadline','source'];
     sheet.getRange(1,1,1,fields.length).setValues([fields]);

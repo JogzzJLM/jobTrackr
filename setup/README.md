@@ -10,7 +10,7 @@ The website is for jobs and applications. Private eligibility settings and mailb
 
 ## Optional Google Sheet
 
-Use a separate spreadsheet. Add `google-sheet.gs` through Extensions → Apps Script. Set Script Property `JOBTRACKR_SYNC_TOKEN` to a long random secret. Deploy as a web app that executes as your account, accessible to Anyone (each request still requires the secret).
+Use a separate spreadsheet. Add `google-sheet.gs` through Extensions → Apps Script. Set Script Property `JOBTRACKR_SPREADSHEET_ID` to the spreadsheet ID from its URL and `JOBTRACKR_SYNC_TOKEN` to a long random secret. The web app opens this exact spreadsheet by ID; an active spreadsheet is not available in web app execution. Deploy as a web app that executes as your account, accessible to Anyone (each request still requires the secret).
 
 Set stack variables `GOOGLE_SHEET_EDIT_URL` to the spreadsheet link, `GOOGLE_SHEET_WEBHOOK_URL` to the deployment's `/exec` URL and `GOOGLE_SHEET_SYNC_TOKEN` to the same secret. Recreate the stack once.
 
