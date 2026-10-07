@@ -22,7 +22,7 @@ class Handler(BaseHTTPRequestHandler):
   path=urlparse(self.path).path
   if path in ('/','/jobs','/applications','/saved','/settings','/status','/closed'):
    return self.reply((ROOT/'index.html').read_bytes(),mime='text/html; charset=utf-8')
-  if path in ('/assets/style.css','/assets/app.js'):
+  if path in ('/assets/style.css','/assets/app.js','/assets/groups.js'):
    return self.reply((ROOT/path.split('/')[-1]).read_bytes(),mime='text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8')
   if path=='/api/state':
    data={'jobs':[{k:v for k,v in job.items() if k not in ('notes','reminder')} for job in store.jobs()],'scan':store.setting('scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'scan_interval':discovery.SCAN_INTERVAL,'sheet_url':sheets.edit_url(),'flow_version':hashlib.sha256(json.dumps((store.setting('sheet_rows') or sheets.snapshot()),sort_keys=True).encode()).hexdigest()[:12],'sheets':store.setting('sheet_health',{})}
