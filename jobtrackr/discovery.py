@@ -223,7 +223,7 @@ _ENRICH_CACHE_LOCK=threading.RLock()
 def enrich(job,force=False):
  cache_path=store.DATA_DIR/'enriched_listings.json';key=job['link']
  with _ENRICH_CACHE_LOCK:cached=store.load_json_safe(cache_path,{}).get(key)
- if cached and not force and cached.get('version')==3:
+ if cached and not force and cached.get('version')==3 and not (job.get('source')=='KPMG employer feed' and not cached.get('job',{}).get('location')):
   ttl=1800 if cached['check']['state'] in ('verified','closed') else 300
   if time.time()-cached['saved_at']<ttl:return {**job,**cached['job']},dict(cached['check'])
  result,check=_enrich(job,force=force)

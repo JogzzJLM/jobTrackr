@@ -125,3 +125,12 @@ class KpmgDistinctRouteTests(unittest.TestCase):
   a={'link':'https://www.kpmgcareers.co.uk/Vacancies/Audit/one','apply_url':'https://www.kpmgcareers.co.uk/graduate/applying-to-kpmg/','alternate_links':['https://www.kpmgcareers.co.uk/Vacancies/Tax/two']}
   b={'link':'https://www.kpmgcareers.co.uk/Vacancies/Tax/two','apply_url':a['apply_url']}
   self.assertFalse(normalization.finance_same_listing(a,b))
+
+class CachedEmployerMetadataTests(unittest.TestCase):
+ def test_blank_cached_kpmg_location_is_rechecked(self):
+  import time
+  row={'link':'https://www.kpmgcareers.co.uk/Vacancies/cache-test/123','source':'KPMG employer feed','title':'Graduate Audit','company':'KPMG','location':'Leeds'}
+  cache=store.DATA_DIR/'enriched_listings.json';store.atomic_write_json(cache,{row['link']:{'version':3,'saved_at':time.time(),'job':{**row,'location':''},'check':{'state':'verified'}}})
+  with patch('jobtrackr.discovery._enrich',return_value=(row,{'state':'verified'})) as enrich:
+   result,_=discovery.enrich(row)
+  enrich.assert_called_once();self.assertEqual(result['location'],'Leeds')
