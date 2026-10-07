@@ -50,7 +50,14 @@ class Handler(BaseHTTPRequestHandler):
    elif path=='/api/email/resolve':
     if data.get('ignore'):
      with store.connect() as c:c.execute('UPDATE email_updates SET resolved=? WHERE id=?',('ignored',str(data.get('id',''))))
-    else:mail.apply_update(str(data.get('id','')),str(data.get('job_id','')),str(data.get('status','')))
+    else:
+     update_id=str(data.get('id',''));job_id=str(data.get('job_id',''));status=str(data.get('status',''))
+     if status not in mail.APPLICATION_STAGES:raise ValueError('Select an application stage')
+     if job_id=='__new':
+      with store.connect() as c:record=c.execute('SELECT id FROM email_updates WHERE id=? AND resolved=?',(update_id,'')).fetchone()
+      if not record:raise ValueError('This email is already resolved or no longer available')
+      job_id=store.application_from_email(update_id,str(data.get('company',''))[:150],str(data.get('title',''))[:300],str(data.get('link',''))[:2000])
+     mail.apply_update(update_id,job_id,status)
    elif path=='/api/rescan':threading.Thread(target=discovery.scan,daemon=True).start()
    elif path=='/api/test-notification':
     import uuid

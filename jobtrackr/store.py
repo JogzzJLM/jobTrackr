@@ -40,8 +40,35 @@ def set_setting(key, value):
  with connect() as c: c.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(key,json.dumps(value)))
 
 def jobs():
+ from .normalization import clean_company_display_name
  with connect() as c: rows=c.execute('SELECT * FROM jobs ORDER BY created DESC').fetchall()
- return [{**json.loads(r['payload']), 'id':r['id'],'status':r['status'],'notes':r['notes'], 'reminder':r['reminder'], 'created':r['created'], 'updated':r['updated']} for r in rows]
+ result=[{**json.loads(r['payload']), 'id':r['id'],'status':r['status'],'notes':r['notes'], 'reminder':r['reminder'], 'created':r['created'], 'updated':r['updated']} for r in rows]
+ for job in result:job['company']=clean_company_display_name(job.get('company',''))
+ return result
+
+def application_from_email(email_id, company, title, link=''):
+ """A confirmed application may be recorded even after its listing has closed."""
+ import hashlib
+ from urllib.parse import urlparse
+ from .normalization import clean_company_display_name, canonical_url
+ company=clean_company_display_name(company.strip());title=title.strip();link=link.strip()
+ if company=='Unknown' or not title:raise ValueError('Enter the employer and role title')
+ if link:
+  parsed=urlparse(link)
+  if parsed.scheme not in ('https','http') or not parsed.hostname:raise ValueError('Use a full application URL, or leave it blank')
+  link=canonical_url(link)
+ identity=link or 'email:'+email_id
+ job_id=hashlib.sha256(identity.encode()).hexdigest()[:24]
+ payload={'id':job_id,'company':company,'title':title,'link':link,'location':'',
+  'source':'Application email','description':'Application recorded from an email confirmed by you.',
+  'verification':{'state':'application_record','reason':'Application history; not a newly verified vacancy'},'category':''}
+ with connect() as c:
+  existing=c.execute('SELECT id FROM jobs WHERE url=?',(identity,)).fetchone()
+  if existing:return existing['id']
+  timestamp=now()
+  c.execute('INSERT INTO jobs(id,url,payload,created,updated) VALUES(?,?,?,?,?)',(job_id,identity,json.dumps(payload),timestamp,timestamp))
+  c.execute('INSERT INTO history(job_id,event,timestamp) VALUES(?,?,?)',(job_id,'Application recorded from email',timestamp))
+ return job_id
 
 def upsert(job):
  timestamp=now()

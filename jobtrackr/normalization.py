@@ -1,6 +1,13 @@
 import re
 from urllib.parse import urlsplit, parse_qsl, urlencode
 
+FINANCE_NAMES = {'pwc': 'PwC', 'pricewaterhousecoopers': 'PwC', 'bdo': 'BDO',
+ 'rsm': 'RSM', 'rsmuk': 'RSM', 'ey': 'EY', 'ernstyoung': 'EY', 'kpmg': 'KPMG',
+ 'deloitte': 'Deloitte', 'grantthornton': 'Grant Thornton',
+ 'forvismazars': 'Forvis Mazars', 'mazars': 'Forvis Mazars',
+ 'evelynpartners': 'Evelyn Partners', 'monzo': 'Monzo', 'wise': 'Wise',
+ 'deliveroo': 'Deliveroo', 'visa': 'Visa', 'acca': 'ACCA'}
+
 COMPANY_ALIASES = {
     "mwinternshipprogram": "marshallwace",
     "marshallwace": "marshallwace",
@@ -68,6 +75,10 @@ def clean_company_display_name(name):
 
     norm = re.sub(r'[^a-z0-9]', '', cleaned.lower())
 
+    finance_key = re.sub(r'(?:limited|ltd|llp|plc)$', '', norm)
+    if finance_key in FINANCE_NAMES:
+        return FINANCE_NAMES[finance_key]
+
     if norm in COMPANY_DISPLAY_NAMES:
         return COMPANY_DISPLAY_NAMES[norm]
 
@@ -89,12 +100,15 @@ def normalize_company(name):
         return ""
     cleaned = str(name).lower().strip()
     cleaned = re.sub(r'[^a-z0-9]', '', cleaned)
-    for suffix in ["ltd", "inc", "plc", "llc", "capital", "technologies", "technology", "group", "uk", "europe", "limited", "careers", "jobs", "program", "internshipprogram"]:
+    for suffix in ["limited", "ltd", "llp", "inc", "plc", "llc", "capital", "technologies", "technology", "group", "uk", "europe", "careers", "jobs", "program", "internshipprogram"]:
         if cleaned.endswith(suffix) and len(cleaned) > len(suffix) + 2:
             cleaned = cleaned[:-len(suffix)]
 
     if cleaned in COMPANY_ALIASES:
         return COMPANY_ALIASES[cleaned]
+
+    if cleaned in FINANCE_NAMES:
+        return re.sub(r'[^a-z0-9]', '', FINANCE_NAMES[cleaned].lower())
 
     return cleaned
 

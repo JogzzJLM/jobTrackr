@@ -61,6 +61,24 @@ class EmailMatchingTests(unittest.TestCase):
  def test_wrong_employer_does_not_match(self):
   from jobtrackr.mail import match_message
   result=match_message('Application received','Other employer','Thank you for applying for Graduate Accountant',[self.job()]);self.assertFalse(result.certain);self.assertFalse(result.job_id)
+ def test_two_specific_urls_require_review(self):
+  from jobtrackr.mail import match_message
+  result=match_message('Application received','hr@example.org','Application received: https://example.org/jobs/a and https://example.org/jobs/b',[self.job(),self.job('b')]);self.assertFalse(result.certain)
+ def test_tracking_parameters_do_not_break_url_match(self):
+  from jobtrackr.mail import match_message
+  result=match_message('Application received','hr@example.org','Application received: https://www.example.org/jobs/a/?utm_source=email',[self.job()]);self.assertEqual(result.job_id,'a');self.assertTrue(result.certain)
+ def test_employer_only_updates_single_recorded_application(self):
+  from jobtrackr.mail import match_message
+  result=match_message('Interview invitation','Example Finance Recruitment','We invite you to interview.',[self.job()]);self.assertTrue(result.certain)
+  new={**self.job(),'status':'New'};self.assertFalse(match_message('Interview invitation','Example Finance Recruitment','We invite you to interview.',[new]).certain)
+ def test_ats_sender_uses_employer_signature(self):
+  from jobtrackr.mail import match_message, employer_from_email
+  body='Thank you for applying for Graduate Accountant.\nRSM Recruitment Team'
+  self.assertEqual(employer_from_email('Application received','noreply@myworkdayjobs.com',body),'RSM')
+  result=match_message('Application received','noreply@myworkdayjobs.com',body,[self.job(company='RSM UK LLP')]);self.assertTrue(result.certain)
+ def test_role_ambiguity_not_resolved_by_company_alone(self):
+  from jobtrackr.mail import match_message
+  result=match_message('Interview invitation','Example Finance Recruitment','We invite you to interview.',[self.job(),self.job('b','Graduate Tax Trainee')]);self.assertFalse(result.certain)
  def test_offer_not_marketing(self):
   from jobtrackr.mail import classify
   self.assertEqual(classify('Special offer! Get 10% off today'),'');self.assertEqual(classify('We are pleased to offer you the position.'),'Offer')
@@ -77,10 +95,42 @@ class MailboxTests(unittest.TestCase):
   with patch.dict(os.environ,{'JOBTRACKR_IMAP_USER':'example@example.org','JOBTRACKR_IMAP_PASSWORD':'test-only'}),patch('jobtrackr.mail.imaplib.IMAP4_SSL') as connection:
    client=connection.return_value;client.response.return_value=('UIDVALIDITY',[b'991']);client.uid.side_effect=[('OK',[b'77']),('OK',[(b'header',raw)]),('OK',[b'77'])];mail.poll();mail.poll();client.select.assert_called_with('INBOX',readonly=True);self.assertEqual(client.uid.call_args_list[1].args[-1],'(BODY.PEEK[])')
   saved=next(j for j in store.jobs() if j['id']==job['id']);self.assertEqual(saved['status'],'Interview');self.assertIn('Keep my notes',saved['notes']);self.assertEqual(len(store.history(job['id'])),3)
+  client.store.assert_not_called();client.expunge.assert_not_called()
+  self.assertTrue(all(call.args[0] in ('search','fetch') for call in client.uid.call_args_list))
+  from jobtrackr import sheets
+  mirrored=next(j for j in sheets.snapshot() if j['id']==job['id']);self.assertEqual(mirrored['status'],'Interview');self.assertIn('Keep my notes',mirrored['notes'])
  def test_missing_mailbox_does_not_connect(self):
   from jobtrackr import mail
   with patch.dict(os.environ,{'JOBTRACKR_IMAP_USER':'','JOBTRACKR_IMAP_PASSWORD':''}),patch('jobtrackr.mail.imaplib.IMAP4_SSL') as connection:mail.poll();connection.assert_not_called()
   self.assertFalse(store.setting('mail_health')['connected'])
+
+class ApplicationEmailWorkflowTests(unittest.TestCase):
+ def test_missing_application_recorded_without_claiming_live_listing(self):
+  from jobtrackr import mail, sheets
+  event='missing-application-test';payload={'subject':'Application received','sender':'hr@example.org','snippet':'Thank you for applying','status':'Applied'}
+  with store.connect() as c:c.execute('INSERT OR REPLACE INTO email_updates VALUES(?,?,?,?)',(event,json.dumps(payload),'',store.now()))
+  first=store.application_from_email(event,'EY','Graduate Audit Trainee');second=store.application_from_email(event,'EY','Graduate Audit Trainee');self.assertEqual(first,second)
+  mail.apply_update(event,first,'Applied');mail.apply_update(event,first,'Applied')
+  job=next(j for j in store.jobs() if j['id']==first);self.assertEqual(job['status'],'Applied');self.assertEqual(job['link'],'');self.assertEqual(job['verification']['state'],'application_record');self.assertEqual(len(store.history(first)),2)
+  self.assertEqual(next(j for j in sheets.snapshot() if j['id']==first)['status'],'Applied')
+  other=store.application_from_email('another-email','BDO','Graduate Accountant');self.assertNotEqual(first,other)
+ def test_unmatched_email_reconciled_after_job_is_discovered(self):
+  from jobtrackr import mail
+  event='late-discovery';payload={'subject':'Application received','sender':'recruitment@latefirm.example','snippet':'Thank you for applying for Graduate Accountant at Latefirm.','status':'Applied'}
+  with store.connect() as c:c.execute('INSERT OR REPLACE INTO email_updates VALUES(?,?,?,?)',(event,json.dumps(payload),'',store.now()))
+  store.upsert({'id':'late-job','company':'Latefirm','title':'Graduate Accountant','link':'https://latefirm.example/jobs/late'})
+  mail.reconcile_updates();self.assertEqual(next(j for j in store.jobs() if j['id']=='late-job')['status'],'Applied')
+ def test_closed_application_never_reopened_by_old_email(self):
+  from jobtrackr import mail
+  job_id=store.application_from_email('terminal-test','Example','Graduate Accountant');store.update_job(job_id,{'status':'Rejected'})
+  with store.connect() as c:c.execute('INSERT OR REPLACE INTO email_updates VALUES(?,?,?,?)',('old-confirmation',json.dumps({'subject':'Application received'}),'',store.now()))
+  job=next(j for j in store.jobs() if j['id']==job_id);mail.advance_update('old-confirmation',job,'Interview');self.assertEqual(next(j for j in store.jobs() if j['id']==job_id)['status'],'Rejected')
+ def test_ignored_messages_do_not_hide_application_reviews(self):
+  from jobtrackr import mail
+  with store.connect() as c:
+   c.execute('INSERT OR REPLACE INTO email_updates VALUES(?,?,?,?)',('review-visible',json.dumps({'subject':'Application update','status':'Applied'}),'','2026-01-01'))
+   for i in range(110):c.execute('INSERT OR REPLACE INTO email_updates VALUES(?,?,?,?)',('ignored-'+str(i),'{}','ignored','2027-01-01'))
+  self.assertIn('review-visible',[item['id'] for item in mail.updates()])
 
 class SourceFallbackTests(unittest.TestCase):
  def test_workday_failure_uses_real_employer_pages(self):

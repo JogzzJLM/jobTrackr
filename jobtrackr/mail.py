@@ -11,7 +11,31 @@ from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
 from . import store, alerts
 from .verifier import plain
+from .normalization import normalize_url, normalize_company, normalize_role, clean_company_display_name, extract_ats_post_id
+from email.utils import parseaddr
 LOCK=threading.Lock()
+APPLICATION_STAGES=('Applied','Assessment','Interview','Offer','Rejected','Withdrawn')
+GENERIC_SENDERS={'gmail','googlemail','outlook','hotmail','yahoo','workday','myworkday','myworkdayjobs','greenhouse','greenhouse-mail','lever','smartrecruiters','icims','tal','successfactors','reed','indeed','noreply','notifications'}
+
+def employer_from_email(subject, sender, body):
+ # Forwarded messages and ATS mail must not be named after the forwarding service.
+ for pattern in (r'(?m)^\s*([A-Z][A-Za-z0-9&.\x27 -]{2,55}?)\s+(?:Talent Acquisition|Recruitment|Early Careers) Team\b',
+                 r'\b(?:your application|applying)\s+(?:to|with|at)\s+([A-Z][A-Za-z0-9&.\x27 -]{2,55}?)(?=[.!\n]|$)'):
+  found=re.search(pattern,body)
+  if found:return clean_company_display_name(found.group(1).strip(' .,|-'))
+ forwarded=re.search(r'(?im)^From:\s*(.+)$',body)
+ address=parseaddr(forwarded.group(1) if forwarded else sender)[1]
+ host=address.partition('@')[2].lower()
+ labels=[part for part in host.split('.') if part not in ('www','mail','email','careers','recruitment','jobs')]
+ if labels and labels[0] not in GENERIC_SENDERS:
+  return clean_company_display_name(labels[0])
+ found=re.search(r'^(?:Re:|Fwd:|Fw:)?\s*(.+?)\s+(?:[-–:]\s*)?(?:Application received|Application update)$',subject,re.I)
+ return clean_company_display_name(found.group(1)) if found else ''
+
+def role_from_email(subject, body):
+ found=re.search(r'\b(?:application for|applying for|applied for)\s+(?:the\s+)?([A-Za-z][A-Za-z0-9 /&()\x27-]{3,100}?)(?=\s+(?:at|with)\s|[.!\n]|$)',subject+'\n'+body,re.I)
+ title=found.group(1).strip() if found else ''
+ return title if title.lower() not in ('role','position','job','opportunity') else ''
 
 @dataclass
 class Match:
@@ -26,48 +50,74 @@ def classify(text):
  if not re.search(r'\b(application|role|position|job|recruitment|interview|assessment|employment|applying)\b',text):return ''
  rules=[('Rejected',r'(?:not (?:be )?(?:progressing|proceeding|moving forward)|unsuccessful|regret to inform|not been successful|not to (?:progress|proceed)|will not be (?:progressing|proceeding))'),
  ('Offer',r'(?:pleased to offer you|offer of employment|employment offer|offer you (?:the|a) (?:role|position|job))'),
- ('Interview',r'(?:invite.{0,70}interview|interview.{0,40}(?:invitation|scheduled|booking|availability)|schedule.{0,40}interview)'),
- ('Assessment',r'(?:invite.{0,70}(?:assessment|online test)|(?:complete|take).{0,70}(?:assessment|online test)|assessment invitation)'),
- ('Applied',r'(?:thank you for (?:your application|applying)|application (?:has been )?received|received your application)')]
+ ('Interview',r'(?:invite.{0,70}interview|interview.{0,40}(?:invitation|scheduled|booking|availability)|schedule.{0,40}interview|invited.{0,50}assessment cent(?:re|er))'),
+ ('Assessment',r'(?:invite.{0,70}(?:assessment|online test|numerical reasoning)|(?:complete|take).{0,70}(?:assessment|online test|numerical reasoning)|assessment invitation)'),
+ ('Applied',r'(?:thank(?: you|s) for (?:your application|applying)|application (?:has been |was |successfully )?received|received your application|application (?:has been |was )?submitted)')]
  return next((status for status,pattern in rules if re.search(pattern,text,re.S)), '')
 
 def match_message(subject, sender, body, jobs):
- text=f'{subject} {sender} {body}'.lower();status=classify(subject+' '+body)
- if not status or ('unsubscribe' in text and 'application' not in text):return Match(status,reason='No application-status evidence')
- matches=[]
+ display_sender=parseaddr(sender)[0] if '@' in sender else sender
+ text=f'{subject} {display_sender} {body}'.lower();status=classify(subject+' '+body)
+ if not status:return Match(status,reason='No application-status evidence')
+ urls=re.findall(r'https?://[^\s<>"\)]+',subject+' '+body)
+ def specific_link(job):
+  link=job.get('link','')
+  return bool(link) and any(normalize_url(u.rstrip('.,')).removesuffix('/apply')==normalize_url(link).removesuffix('/apply') or
+   (extract_ats_post_id(u) and extract_ats_post_id(u)==extract_ats_post_id(link)) for u in urls)
+ active=[job for job in jobs if job.get('status')!='Dismissed']
+ exact=[job for job in active if specific_link(job)]
+ if len(exact)==1:return Match(status,exact[0]['id'],True,(exact[0]['id'],),'Specific application URL')
+ if len(exact)>1:return Match(status,candidates=tuple(j['id'] for j in exact),reason='Several application URLs; choose the matching role')
+ employer=normalize_company(employer_from_email(subject,sender,body))
+ candidates=[]
  for job in jobs:
-  if job['status']=='Dismissed':continue
+  if job.get('status')=='Dismissed':continue
   company=job.get('company','').lower().strip()
   if not company:continue
-  words=[w for w in re.findall(r'[a-z0-9]+',company) if w not in ('uk','limited','ltd','llp','the')]
-  company_match=bool(words) and all(re.search(r'(?<![a-z0-9])'+re.escape(w)+r'(?![a-z0-9])',text) or w in sender.lower() for w in words)
-  link=job.get('link','').lower()
-  exact=bool(link and link in text)
-  title_words=set(re.findall(r'[a-z0-9]+',job.get('title','').lower()))-{'the','and','of','in','with','programme','program','2026','2027','september','january','graduate'}
-  hits=sum(bool(re.search(r'\b'+re.escape(w)+r'\b',text)) for w in title_words)
-  ratio=hits/max(1,len(title_words))
-  if exact or (company_match and hits>=1):
-   score=100 if exact else 40+40*ratio+min(hits,5)*3
-   matches.append((score,job['id'],exact,ratio))
- matches.sort(reverse=True)
- if not matches:return Match(status,reason='Company or role cannot be matched to a saved job')
- top=matches[0];margin=top[0]-(matches[1][0] if len(matches)>1 else 0)
- certain=top[2] or (top[0]>=78 and top[3]>=.65 and margin>=12)
- return Match(status,top[1] if certain else '',certain,tuple(x[1] for x in matches[:5]),'Exact listing URL' if top[2] else 'Distinct company and role match' if certain else 'Several jobs or incomplete role evidence; choose manually')
+  key=normalize_company(company)
+  words=[w for w in re.findall(r'[a-z0-9]+',clean_company_display_name(company).lower()) if w not in ('uk','limited','ltd','llp','plc','the')]
+  mentioned=bool(words) and all(re.search(r'\b'+re.escape(w)+r'\b',text) for w in words)
+  if mentioned or key==employer:candidates.append(job)
+ norm_text=' '+normalize_role(subject+' '+body)+' '
+ roles=[job for job in candidates if normalize_role(job.get('title','')) and ' '+normalize_role(job['title'])+' ' in norm_text]
+ if len(roles)==1:return Match(status,roles[0]['id'],True,tuple(j['id'] for j in candidates[:5]),'Distinct employer and role title')
+ # Company-only matching is restricted to one existing application, as in ApplicationTrackr.
+ if len(candidates)==1 and candidates[0].get('status') in APPLICATION_STAGES:
+  return Match(status,candidates[0]['id'],True,(candidates[0]['id'],),'Single recorded application for this employer')
+ return Match(status,candidates=tuple(j['id'] for j in candidates[:5]),reason='Several jobs or incomplete role evidence; choose manually' if candidates else 'Application not in the tracker; select a job or record it from this email')
 
 def updates():
- with store.connect() as c:return [{'id':r['id'],**json.loads(r['payload']),'resolved':r['resolved']} for r in c.execute('SELECT * FROM email_updates ORDER BY created DESC LIMIT 100')]
+ with store.connect() as c:return [{'id':r['id'],**json.loads(r['payload']),'resolved':r['resolved']} for r in c.execute("SELECT * FROM email_updates WHERE resolved!='ignored' ORDER BY created DESC LIMIT 100")]
+
+def advance_update(update_id, job, status):
+ order={'New':0,'Saved':0,'Applied':1,'Assessment':2,'Interview':3,'Offer':4,'Rejected':5,'Withdrawn':5}
+ if job['status'] in ('Rejected','Withdrawn') or order.get(status,0)<=order.get(job['status'],0):
+  with store.connect() as c:c.execute('UPDATE email_updates SET resolved=? WHERE id=?',('no-stage-change:'+job['id'],update_id))
+ else:apply_update(update_id,job['id'],status)
+
+def reconcile_updates():
+ # An email may arrive before discovery saves the corresponding job.
+ jobs=store.jobs()
+ with store.connect() as c:pending=c.execute("SELECT id,payload FROM email_updates WHERE resolved='' ORDER BY created LIMIT 200").fetchall()
+ for row in pending:
+  record=json.loads(row['payload'])
+  decision=match_message(record.get('subject',''),record.get('sender',''),record.get('snippet',''),jobs)
+  if decision.certain:
+   job=next(j for j in jobs if j['id']==decision.job_id)
+   advance_update(row['id'],job,decision.status)
+   jobs=store.jobs()
 
 def apply_update(update_id, job_id, status):
- if status not in store.STATUSES:raise ValueError('Invalid status')
- with store.connect() as c:row=c.execute('SELECT payload FROM email_updates WHERE id=?',(update_id,)).fetchone()
+ if status not in APPLICATION_STAGES:raise ValueError('Select an application stage')
+ with store.connect() as c:row=c.execute('SELECT payload,resolved FROM email_updates WHERE id=?',(update_id,)).fetchone()
  if not row:raise ValueError('Message not found')
  payload=json.loads(row[0]);job=next((j for j in store.jobs() if j['id']==job_id),None)
  if not job:raise ValueError('Select a tracked job')
+ if row['resolved']=='matched:'+job_id and job['status']==status:return
  notes=job.get('notes','')+'\nEmail update: '+payload.get('subject','')
  store.update_job(job_id,{'status':status,'notes':notes.strip()})
  with store.connect() as c:c.execute('UPDATE email_updates SET resolved=? WHERE id=?',('matched:'+job_id,update_id))
- alerts.enqueue('email:'+update_id,'JobTrackr application update','An application record has been updated from a matched email. Open JobTrackr to view it.',alerts.base()+'/#applications')
+ alerts.enqueue('email:'+update_id,'JobTrackr application update',f"{job['company']} — {job['title']}\nStatus: {status}\nUpdated from an application email. Sheet sync follows automatically.",alerts.base()+'/#applications')
 
 def decode(value):
  try:return str(make_header(decode_header(value or '')))
@@ -107,16 +157,14 @@ def poll():
    if not payload:continue
    message=email.message_from_bytes(payload);subject=decode(message['Subject']);sender=decode(message['From']);body=message_body(message)
    decision=match_message(subject,sender,body,store.jobs())
-   record={'subject':subject[:300],'sender':sender[:300],'date':decode(message['Date'])[:100],'snippet':body[:1200] if decision.status else '', 'status':decision.status,'candidates':list(decision.candidates),'reason':decision.reason}
+   record={'subject':subject[:300],'sender':sender[:300],'date':decode(message['Date'])[:100],'snippet':body[:4000] if decision.status else '', 'status':decision.status,'candidates':list(decision.candidates),'reason':decision.reason,'company':employer_from_email(subject,sender,body),'title':role_from_email(subject,body)}
    resolved='ignored' if not decision.status else ''
    if not decision.status:record={'status':'','reason':'Not an application update'}
    with store.connect() as c:c.execute('INSERT OR IGNORE INTO email_updates VALUES(?,?,?,?)',(mid,json.dumps(record),resolved,store.now()))
    if decision.certain:
     job=next(j for j in store.jobs() if j['id']==decision.job_id)
-    order={'New':0,'Saved':0,'Applied':1,'Assessment':2,'Interview':3,'Offer':4,'Rejected':5,'Withdrawn':5}
-    if order.get(decision.status,0)>order.get(job['status'],0):apply_update(mid,decision.job_id,decision.status)
-    else:
-     with store.connect() as c:c.execute('UPDATE email_updates SET resolved=? WHERE id=?',('no-stage-change:'+decision.job_id,mid))
+    advance_update(mid,job,decision.status)
+  reconcile_updates()
   store.set_setting('mail_health',{'connected':True,'last_checked':store.now(),'message':'Mailbox checked. Ambiguous matches await review.'})
  except (imaplib.IMAP4.error,OSError,ValueError):store.set_setting('mail_health',{'connected':False,'message':'Mailbox connection failed. Check the separate JobTrackr credentials.','last_checked':store.now()})
  finally:

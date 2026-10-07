@@ -10,7 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 from . import store, alerts
 from .eligibility import evaluate, displayable
-from .normalization import normalize_url, canonical_url
+from .normalization import normalize_url, canonical_url, clean_company_display_name
 from .verifier import verify_listing, plain, deadline_date
 SCAN_INTERVAL=max(300,int(os.getenv("SCRAPER_INTERVAL_SECONDS","300")))
 SCAN_LOCK=threading.Lock()
@@ -20,7 +20,7 @@ def get(url):
  r=requests.get(url,headers=HEADERS,timeout=20);r.raise_for_status();return r
 
 def candidate(company,title,location,link,source,description='',**extra):
- return {'company':company,'title':title,'location':location,'link':canonical_url(link),'source':source,'description':plain(description),**extra}
+ return {'company':clean_company_display_name(company) if company else '', 'title':title,'location':location,'link':canonical_url(link),'source':source,'description':plain(description),**extra}
 
 def board(name,url,pattern,company='',pages=5):
  visited=set();result=[]
@@ -167,6 +167,7 @@ def _enrich(job,force=False):
     job['verification_url']=job.get('verification_url') or job['link'];job['apply_url']=apply;job['link']=canonical_url(apply).removesuffix('/apply')
    if node:job['description']=node.get_text(' ',strip=True)
   except requests.RequestException:pass
+ job['company']=clean_company_display_name(job.get('company',''))
  return job,check
 
 _ENRICH_CACHE_LOCK=threading.RLock()
@@ -207,7 +208,7 @@ def scan():
    decision=evaluate(existing)
    if not displayable(decision):
     existing['verification']={'state':decision['state'],'reason':'; '.join(decision['requirements']),'checked_at':store.now()};store.upsert(existing)
-  candidates.extend({k:v for k,v in j.items() if k not in ('status','notes','reminder','created','updated')} for j in store.jobs())
+  candidates.extend({k:v for k,v in j.items() if k not in ('status','notes','reminder','created','updated')} for j in store.jobs() if j.get('link'))
   unique={normalize_url(j['link']):j for j in candidates if j.get('link') and evaluate(j)['state']!='filtered'}
   with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
    futures={pool.submit(enrich,j):j for j in unique.values()}
