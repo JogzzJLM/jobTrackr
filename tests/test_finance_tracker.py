@@ -98,7 +98,7 @@ class MailboxTests(unittest.TestCase):
   client.store.assert_not_called();client.expunge.assert_not_called()
   self.assertTrue(all(call.args[0] in ('search','fetch') for call in client.uid.call_args_list))
   from jobtrackr import sheets
-  mirrored=next(j for j in sheets.snapshot() if j['id']==job['id']);self.assertEqual(mirrored['status'],'Interview');self.assertIn('Keep my notes',mirrored['notes'])
+  mirrored=next(j for j in sheets.snapshot() if j['id']==job['id']);self.assertEqual(mirrored['status'],'Interview');self.assertEqual(mirrored['stages'],['Applied','Interview'])
  def test_missing_mailbox_does_not_connect(self):
   from jobtrackr import mail
   with patch.dict(os.environ,{'JOBTRACKR_IMAP_USER':'','JOBTRACKR_IMAP_PASSWORD':''}),patch('jobtrackr.mail.imaplib.IMAP4_SSL') as connection:mail.poll();connection.assert_not_called()
@@ -156,12 +156,12 @@ class DiscoveryFirstTests(unittest.TestCase):
    with patch('jobtrackr.sheets.requests.post',side_effect=ConnectionError):self.assertFalse(sheets.sync())
    self.assertEqual(store.setting('sheet_fingerprint'),'')
    with patch('jobtrackr.sheets.requests.post') as post:
-    post.return_value.json.return_value={'ok':True,'count':1}
+    post.return_value.json.return_value={'ok':True,'count':1,'layout':'applications-v2'}
     self.assertTrue(sheets.sync());self.assertTrue(sheets.sync());self.assertEqual(post.call_count,1)
  def test_sheet_does_not_ack_partial_write(self):
   from jobtrackr import sheets
   with patch.dict(os.environ,{'GOOGLE_SHEET_WEBHOOK_URL':'https://example.org/exec','GOOGLE_SHEET_SYNC_TOKEN':'test-only'}),patch('jobtrackr.sheets.snapshot',return_value=[{'id':'partial'}]),patch('jobtrackr.sheets.requests.post') as post:
-   store.set_setting('sheet_fingerprint','');post.return_value.json.return_value={'ok':True,'count':0}
+   store.set_setting('sheet_fingerprint','');post.return_value.json.return_value={'ok':True,'count':0,'layout':'applications-v2'}
    self.assertFalse(sheets.sync());self.assertEqual(store.setting('sheet_fingerprint'),'')
  def test_flow_uses_recorded_transitions_without_inventing_assessment(self):
   from jobtrackr import flow
@@ -191,3 +191,20 @@ class DiscoveryFirstTests(unittest.TestCase):
  def test_unquantified_essential_experience_is_not_assumed(self):
   result=evaluate({'title':'Finance Assistant','location':'London, UK','description':'Skills and experience essential: Previous experience in a finance assistant role.'})
   self.assertEqual(result['state'],'needs_check')
+
+class ApplicationsOnlySheetTests(unittest.TestCase):
+ def test_discovery_and_saved_roles_are_excluded(self):
+  from jobtrackr import sheets
+  jobs=[{'id':'new','status':'New'},{'id':'saved','status':'Saved'},{'id':'dismissed','status':'Dismissed'}]
+  with patch('jobtrackr.store.jobs',return_value=jobs),patch('jobtrackr.store.history',return_value=[]):self.assertEqual(sheets.snapshot(),[])
+ def test_stages_follow_actual_history_and_preserve_closed_applications(self):
+  from jobtrackr import sheets
+  job={'id':'a','company':'RSM','title':'Audit Graduate','status':'Rejected'}
+  history=[{'event':'Status: Rejected'},{'event':'Notes or reminder updated'},{'event':'Status: Interview'},{'event':'Status: Applied'}]
+  with patch('jobtrackr.store.jobs',return_value=[job]),patch('jobtrackr.store.history',return_value=history):
+   row=sheets.snapshot()[0];self.assertEqual(row['stages'],['Applied','Interview','Rejected']);self.assertNotIn('notes',row)
+ def test_old_sheet_endpoint_cannot_ack_new_layout(self):
+  from jobtrackr import sheets
+  store.set_setting('sheet_fingerprint','')
+  with patch.dict(os.environ,{'GOOGLE_SHEET_WEBHOOK_URL':'https://example.org/exec','GOOGLE_SHEET_SYNC_TOKEN':'test-only'}),patch('jobtrackr.sheets.snapshot',return_value=[]),patch('jobtrackr.sheets.requests.post') as post:
+   post.return_value.json.return_value={'ok':True,'count':0};self.assertFalse(sheets.sync())
