@@ -42,7 +42,7 @@ def board(name,url,pattern,company='',pages=5):
 def _bdo_workday():
  result=[];offset=0
  for _ in range(10):
-  r=requests.post('https://bdouk.wd3.myworkdayjobs.com/wday/cxs/bdouk/BDO_Early_in_Career/jobs',headers=HEADERS,json={'appliedFacets':{},'limit':20,'offset':offset,'searchText':'graduate'},timeout=20);r.raise_for_status();page=r.json();items=page.get('jobPostings',[])
+  r=requests.post('https://bdouk.wd3.myworkdayjobs.com/wday/cxs/bdouk/BDO_Early_in_Career/jobs',headers={**HEADERS,'Accept':'application/json'},json={'appliedFacets':{},'limit':20,'offset':offset,'searchText':'graduate'},timeout=20);r.raise_for_status();page=r.json();items=page.get('jobPostings',[])
   for j in items:
    result.append(candidate('BDO',j['title'],j.get('locationsText',''), 'https://bdouk.wd3.myworkdayjobs.com/BDO_Early_in_Career'+j['externalPath'],'BDO employer feed',country='GB'))
   offset+=len(items)
@@ -92,6 +92,22 @@ def smart(company):
   results.append(j)
  return results
 
+def asda():
+ result=[];offset=0
+ for _ in range(10):
+  r=requests.post('https://asda.wd103.myworkdayjobs.com/wday/cxs/asda/AsdaJobs/jobs',headers={**HEADERS,'Accept':'application/json'},json={'appliedFacets':{},'limit':20,'offset':offset,'searchText':'finance'},timeout=20);r.raise_for_status();page=r.json();items=page.get('jobPostings',[])
+  for item in items:
+   job=candidate('Asda',item['title'],item.get('locationsText',''),'https://asda.wd103.myworkdayjobs.com/AsdaJobs'+item['externalPath'],'Asda employer feed',country='GB')
+   # This exact cross-post was independently matched against Asda's published
+   # programme and requisition, not inferred from an agency's unnamed client.
+   if item['externalPath'].endswith('_R-106204'):
+    job['alternate_links']=['https://www.reed.co.uk/jobs/finance-graduate-programme/57377624']
+   result.append(job)
+  offset+=len(items)
+  if not items or offset>=page.get('total',offset):break
+ return result
+
+
 def kpmg():
  result=[];url='https://www.kpmgcareers.co.uk/search/vacancies?intakeType=Student&page=1&searchText=graduate'
  visited=set()
@@ -110,7 +126,7 @@ def kpmg():
 
 
 def sources():
- return [('BDO employer feed',bdo_workday),('KPMG employer feed',kpmg),
+ return [('BDO employer feed',bdo_workday),('KPMG employer feed',kpmg),('Asda employer feed',asda),
  ('Accountancy Careers',lambda:board('Accountancy Careers','https://www.accountancycareers.co.uk/search/jobs/',r'/jobs/[^/]+/',pages=5)),
  ('Graduate-jobs.com accounting',lambda:board('Graduate-jobs.com accounting','https://www.graduate-jobs.com/jobs/accounting',r'/job/',pages=5)),
  *[(f'Graduate-jobs.com {area}',lambda area=area:board(f'Graduate-jobs.com {area}',f'https://www.graduate-jobs.com/jobs/{area}',r'/job/',pages=5)) for area in ('finance','banking')],
@@ -202,13 +218,13 @@ _ENRICH_CACHE_LOCK=threading.RLock()
 def enrich(job,force=False):
  cache_path=store.DATA_DIR/'enriched_listings.json';key=job['link']
  with _ENRICH_CACHE_LOCK:cached=store.load_json_safe(cache_path,{}).get(key)
- if cached and not force and cached.get('version')==2:
+ if cached and not force and cached.get('version')==3:
   ttl=1800 if cached['check']['state'] in ('verified','closed') else 300
   if time.time()-cached['saved_at']<ttl:return {**job,**cached['job']},dict(cached['check'])
  result,check=_enrich(job,force=force)
  with _ENRICH_CACHE_LOCK:
   cache=store.load_json_safe(cache_path,{})
-  cache[key]={'version':2,'saved_at':time.time(),'job':{k:v for k,v in result.items() if k not in ('status','notes','reminder','created','updated')},'check':check}
+  cache[key]={'version':3,'saved_at':time.time(),'job':{k:v for k,v in result.items() if k not in ('status','notes','reminder','created','updated')},'check':check}
   cache=dict(sorted(cache.items(),key=lambda item:item[1]['saved_at'],reverse=True)[:2000])
   store.atomic_write_json(cache_path,cache)
  return result,check

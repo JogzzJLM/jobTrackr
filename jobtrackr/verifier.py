@@ -62,6 +62,7 @@ def salary_text(value):
 
 def application_link(soup, url):
     from urllib.parse import urljoin
+    from .normalization import specific_application_url
     main=soup.find('main') or soup
     # Exclude recommendations and global navigation before looking for Apply.
     for node in main.select('nav,footer,.similar-jobs,.recommended-jobs'):node.decompose()
@@ -71,7 +72,7 @@ def application_link(soup, url):
         host=urlparse(target).hostname or ''
         label=text+' '+target
         known=any(host.endswith(x) for x in ('.tal.net','.myworkdayjobs.com','greenhouse.io','lever.co','smartrecruiters.com','kpmgcareers.co.uk','.careers.hibob.com'))
-        if known and re.search(r'apply|instant=apply',label,re.I) and len(urlparse(target).path.strip('/').split('/'))>=2:
+        if known and specific_application_url(target) and re.search(r'apply|instant=apply',label,re.I) and len(urlparse(target).path.strip('/').split('/'))>=2:
             return target
     return ''
 

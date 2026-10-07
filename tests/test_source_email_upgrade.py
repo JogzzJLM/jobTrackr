@@ -101,3 +101,27 @@ class ApplicationRouteMatchingTests(unittest.TestCase):
   with patch('jobtrackr.mail.store.update_job',side_effect=RuntimeError('interrupted')):
    with self.assertRaises(RuntimeError):mail.apply_update('resume-evidence',jobid,'Interview')
   mail.apply_update('resume-evidence',jobid,'Interview');self.assertEqual(next(j for j in store.jobs() if j['id']==jobid)['status'],'Interview');self.assertEqual(len(store.application_events(jobid)),1)
+
+class AsdaEmployerFeedTests(unittest.TestCase):
+ def test_known_reed_crosspost_is_merged_into_exact_employer_requisition(self):
+  page={'total':1,'jobPostings':[{'title':'Finance Graduate Programme','locationsText':'Asda House','externalPath':'/job/Asda-House/Finance-Graduate-Programme_R-106204'}]}
+  with patch('jobtrackr.discovery.requests.post') as post:
+   post.return_value.json.return_value=page;row=discovery.asda()[0]
+  self.assertEqual(row['company'],'Asda');self.assertIn('asda.wd103.myworkdayjobs.com',row['link']);self.assertEqual(normalization.vacancy_identity(row),'wd:asda:r-106204')
+  self.assertTrue(normalization.finance_same_listing(row,{'link':'https://www.reed.co.uk/jobs/finance-graduate-programme/57377624'}))
+
+class KpmgDistinctRouteTests(unittest.TestCase):
+ def test_information_link_is_not_application_destination(self):
+  from bs4 import BeautifulSoup
+  soup=BeautifulSoup('<a href="/graduate/applying-to-kpmg/">Applying to KPMG</a><a href="https://student.kpmgcareers.co.uk/graduates2027/Login.aspx?intake_year=2027&amp;programme=Graduate&amp;business_area=Audit&amp;location=Watford&amp;start_date=Autumn">Apply for role</a>','html.parser')
+  self.assertIn('student.kpmgcareers.co.uk',verifier.application_link(soup,'https://www.kpmgcareers.co.uk/Vacancies/test/123'))
+ def test_different_kpmg_locations_with_login_query_remain_distinct(self):
+  base={'company':'KPMG','description':'Role details '*40,'title':'Graduate Audit','route_type':'Direct employer'}
+  for city in ('Watford','Leeds'):
+   row={**base,'id':'kpmg-route-'+city,'location':city,'link':'https://www.kpmgcareers.co.uk/Vacancies/test/'+city,'apply_url':'https://student.kpmgcareers.co.uk/graduates2027/Login.aspx?intake_year=2027&programme=Graduate&business_area=Audit&location='+city+'&start_date=Autumn'}
+   self.assertTrue(store.upsert(row))
+  self.assertEqual(len([j for j in store.jobs() if j['id'].startswith('kpmg-route-')]),2)
+ def test_polluted_aliases_and_generic_guide_do_not_merge_roles(self):
+  a={'link':'https://www.kpmgcareers.co.uk/Vacancies/Audit/one','apply_url':'https://www.kpmgcareers.co.uk/graduate/applying-to-kpmg/','alternate_links':['https://www.kpmgcareers.co.uk/Vacancies/Tax/two']}
+  b={'link':'https://www.kpmgcareers.co.uk/Vacancies/Tax/two','apply_url':a['apply_url']}
+  self.assertFalse(normalization.finance_same_listing(a,b))

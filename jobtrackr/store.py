@@ -37,6 +37,16 @@ CREATE TABLE IF NOT EXISTS email_updates(id TEXT PRIMARY KEY, payload TEXT NOT N
 CREATE TABLE IF NOT EXISTS application_events(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, payload TEXT NOT NULL, occurred_at TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS reviews(url TEXT PRIMARY KEY, payload TEXT NOT NULL);''')
   c.execute('INSERT OR IGNORE INTO settings VALUES(?,?)', ('profile', json.dumps(DEFAULT_PROFILE)))
+  # Repair aliases created by a shared KPMG information/login route. Keep the
+  # original record, status and history; the next scan restores distinct roles.
+  from .normalization import specific_application_url
+  for row in c.execute('SELECT id,payload FROM jobs').fetchall():
+   payload=json.loads(row['payload'])
+   if 'kpmgcareers.co.uk/Vacancies/' not in payload.get('link',''):continue
+   payload['alternate_links']=[x for x in payload.get('alternate_links',[]) if x==payload['link']]
+   if payload.get('apply_url') and not specific_application_url(payload['apply_url']):payload.pop('apply_url',None)
+   c.execute('UPDATE jobs SET payload=? WHERE id=?',(json.dumps(payload),row['id']))
+
 
 def setting(key, default=None):
  with connect() as c: row=c.execute('SELECT payload FROM settings WHERE key=?',(key,)).fetchone()

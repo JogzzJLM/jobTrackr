@@ -303,15 +303,34 @@ def canonical_url(url):
     query=[(k,v) for k,v in parse_qsl(parsed.query) if k.lower() in {'gh_jid','jobid','job','jid','reqid','requisitionid','vacancyid'}]
     return urlunsplit((parsed.scheme,parsed.netloc,parsed.path.rstrip('/'),urlencode(sorted(query)),''))
 
+def specific_application_url(url):
+    parsed=urlsplit(url);host=(parsed.hostname or '').lower()
+    if host.endswith('kpmgcareers.co.uk'):
+        params=dict(parse_qsl(parsed.query))
+        return host=='student.kpmgcareers.co.uk' and all(params.get(k) for k in ('intake_year','programme','business_area','location','start_date'))
+    return not re.search(r'/(?:applying-to|how-to-apply|login|sign-in|register)(?:/|$)',parsed.path,re.I)
+
+def listing_links(job):
+    primary=job.get('link','');aliases=job.get('alternate_links',[])
+    if 'kpmgcareers.co.uk/Vacancies/' in primary:
+        aliases=[x for x in aliases if x==primary]
+    return [primary,*aliases]+([job['apply_url']] if job.get('apply_url') and specific_application_url(job['apply_url']) else [])
+
+def listing_link_key(url):
+    if (urlsplit(url).hostname or '').lower()=='student.kpmgcareers.co.uk':
+        parsed=urlsplit(url);return parsed.netloc.lower()+parsed.path.lower()+'?'+urlencode(sorted(parse_qsl(parsed.query)))
+    return normalize_url(url)
+
 def vacancy_identity(job):
     """Employer ATS identity, independent of a board or a session-specific Apply URL."""
     for url in (job.get('apply_url',''),job.get('link','')):
         parsed=urlsplit(url);host=(parsed.hostname or '').lower();path=parsed.path
+        if host=='student.kpmgcareers.co.uk' and specific_application_url(url):return 'kpmg:'+listing_link_key(url)
         if host.endswith('.tal.net'):
             found=re.search(r'/opp/(\d+)',path,re.I)
             if found:return 'tal:'+host+':'+found.group(1)
         if host.endswith('.myworkdayjobs.com'):
-            found=re.search(r'_([A-Za-z]*\d+)(?:/apply)?/?$',path)
+            found=re.search(r'_([A-Za-z0-9-]*\d+)(?:/apply)?/?$',path)
             if found:return 'wd:'+host.split('.')[0]+':'+found.group(1).lower()
         native=extract_ats_post_id(url)
         if native:return native
@@ -321,9 +340,8 @@ def vacancy_identity(job):
     return ''
 
 def finance_same_listing(a,b):
-    links_a=[a.get('link',''),a.get('apply_url',''),*a.get('alternate_links',[])]
-    links_b=[b.get('link',''),b.get('apply_url',''),*b.get('alternate_links',[])]
-    if set(normalize_url(x) for x in links_a if x)&set(normalize_url(x) for x in links_b if x):return True
+    links_a=listing_links(a);links_b=listing_links(b)
+    if set(listing_link_key(x) for x in links_a if x)&set(listing_link_key(x) for x in links_b if x):return True
     native_a,native_b=vacancy_identity(a),vacancy_identity(b)
     if native_a and native_b:return native_a==native_b
     if normalize_company(a.get('company'))!=normalize_company(b.get('company')):return False
