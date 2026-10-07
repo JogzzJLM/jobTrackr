@@ -45,3 +45,9 @@ The listener checks the last 14 days (up to 100 latest messages) every five minu
 ## Simplified discovery-first interface
 
 Jobs, applications with a stage-flow diagram, email updates and service status. No shortlist, profile editor or manual scan control. Discovery checks automatically every five minutes by default, matching ApplicationTrackr. Private first-time settings and optional Google Sheet sync are documented in [setup/README.md](setup/README.md).
+
+## Discovery and email reliability
+
+Source status reports verified, unconfirmed and filtered outcomes rather than only fetched candidate counts. KPMG is collected directly with pagination. RSM application destinations are checked independently of its employer pages. Shared per-host pacing and HTTP 429 cooldown reduce repeated blocked requests. Employer-native application IDs and conservative exact-advert matching prevent duplicate cards and preserve existing application IDs/status.
+
+Gmail All Mail detection, saved UID checkpoints, Message-ID deduplication and retryable batches cover archived mail and busy inboxes without marking messages read. Explicit interview/assessment rounds and email evidence appear in Activity and sync to the Sheet. Notifications have an independent delivery worker.

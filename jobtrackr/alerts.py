@@ -18,7 +18,7 @@ def enqueue(event, title, message, url=None):
 
 def new_listing(job):
  enqueue('listing:'+job['id'],f"New finance role: {job['company']} - {job['title']}",
- f"{job['title']}\n{job['company']} | {job['location']}\nSalary: {job.get('salary') or 'Not published'}\nDeadline: {job.get('deadline') or 'Not published'}\nStudy support: {'Mentioned' if job.get('study_support') else 'Not confirmed'}\n"+'; '.join(job.get('reasons',[]))+('\nCheck before applying: '+'; '.join(job.get('requirements',[])) if job.get('requirements') else '')+f"\nVerified and saved to JobTrackr.\n{job['link']}",job['link'])
+ f"{job['title']}\n{job['company']} | {job['location']}\nSalary: {job.get('salary') or 'Not published'}\nDeadline: {job.get('deadline') or 'Not published'}\nStudy support: {'Mentioned' if job.get('study_support') else 'Not confirmed'}\n"+'; '.join(job.get('reasons',[]))+'\nRoute: '+job.get('route_type','Public job advert')+f"\nPublic vacancy page checked and saved to JobTrackr.\n{job['link']}",job['link'])
 
 def flush():
  if os.getenv('NOTIFICATIONS_DISABLED')=='1':return
@@ -59,3 +59,13 @@ def scheduled():
   if recent:
    enqueue(day,'JobTrackr daily summary',f"{len(recent)} verified finance opportunities found today.\n"+'\n'.join(f"{j['company']}: {j['title']}" for j in recent[:6])+f"\n{base()}")
  flush()
+
+
+def loop(stop):
+ # Delivery must keep moving while discovery is busy or a source is slow.
+ last_schedule=0
+ while not stop.is_set():
+  if time.monotonic()-last_schedule>=60:
+   scheduled();last_schedule=time.monotonic()
+  else:flush()
+  stop.wait(15)

@@ -31,7 +31,8 @@ def sheet_counts(rows):
 def html():
  import plotly.graph_objects as go
  rows=store.setting('sheet_rows',None)
- flows=counts(store.jobs()) if rows is None else sheet_counts(rows)
+ from . import sheets
+ flows=sheet_counts(sheets.snapshot()) if rows is None else sheet_counts(rows)
  if not flows:return '<html><body style="font:15px system-ui;color:#555;padding:24px">Your application flow will appear when you track your first application.</body></html>'
  nodes=['Applications']+list(dict.fromkeys(s for pair in flows for s in pair if s!='Applications'))
  totals=Counter()

@@ -11,8 +11,9 @@ from datetime import datetime, timedelta, timezone
 from email.header import decode_header, make_header
 from . import store, alerts
 from .verifier import plain
-from .normalization import normalize_url, normalize_company, normalize_role, clean_company_display_name, extract_ats_post_id
+from .normalization import normalize_url, normalize_company, normalize_role, clean_company_display_name, extract_ats_post_id, finance_same_listing
 from email.utils import parseaddr
+from . import events
 LOCK=threading.Lock()
 APPLICATION_STAGES=('Applied','Assessment','Interview','Offer','Rejected','Withdrawn')
 GENERIC_SENDERS={'gmail','googlemail','outlook','hotmail','yahoo','workday','myworkday','myworkdayjobs','greenhouse','greenhouse-mail','lever','smartrecruiters','icims','tal','successfactors','reed','indeed','noreply','notifications'}
@@ -61,9 +62,7 @@ def match_message(subject, sender, body, jobs):
  if not status:return Match(status,reason='No application-status evidence')
  urls=re.findall(r'https?://[^\s<>"\)]+',subject+' '+body)
  def specific_link(job):
-  link=job.get('link','')
-  return bool(link) and any(normalize_url(u.rstrip('.,')).removesuffix('/apply')==normalize_url(link).removesuffix('/apply') or
-   (extract_ats_post_id(u) and extract_ats_post_id(u)==extract_ats_post_id(link)) for u in urls)
+  return any(finance_same_listing({'link':u.rstrip('.,')},job) for u in urls)
  active=[job for job in jobs if job.get('status')!='Dismissed']
  exact=[job for job in active if specific_link(job)]
  if len(exact)==1:return Match(status,exact[0]['id'],True,(exact[0]['id'],),'Specific application URL')
@@ -91,14 +90,13 @@ def updates():
 
 def advance_update(update_id, job, status):
  order={'New':0,'Saved':0,'Applied':1,'Assessment':2,'Interview':3,'Offer':4,'Rejected':5,'Withdrawn':5}
- if job['status'] in ('Rejected','Withdrawn') or order.get(status,0)<=order.get(job['status'],0):
-  with store.connect() as c:c.execute('UPDATE email_updates SET resolved=? WHERE id=?',('no-stage-change:'+job['id'],update_id))
- else:apply_update(update_id,job['id'],status)
+ can_advance=job['status'] not in ('Rejected','Withdrawn') and order.get(status,0)>=order.get(job['status'],0)
+ apply_update(update_id,job['id'],status,change_stage=can_advance)
 
 def reconcile_updates():
  # An email may arrive before discovery saves the corresponding job.
  jobs=store.jobs()
- with store.connect() as c:pending=c.execute("SELECT id,payload FROM email_updates WHERE resolved='' ORDER BY created LIMIT 200").fetchall()
+ with store.connect() as c:pending=c.execute("SELECT id,payload FROM email_updates WHERE resolved='' ORDER BY created").fetchall()
  for row in pending:
   record=json.loads(row['payload'])
   decision=match_message(record.get('subject',''),record.get('sender',''),record.get('snippet',''),jobs)
@@ -107,16 +105,27 @@ def reconcile_updates():
    advance_update(row['id'],job,decision.status)
    jobs=store.jobs()
 
-def apply_update(update_id, job_id, status):
+def apply_update(update_id, job_id, status, change_stage=True):
  if status not in APPLICATION_STAGES:raise ValueError('Select an application stage')
  with store.connect() as c:row=c.execute('SELECT payload,resolved FROM email_updates WHERE id=?',(update_id,)).fetchone()
  if not row:raise ValueError('Message not found')
  payload=json.loads(row[0]);job=next((j for j in store.jobs() if j['id']==job_id),None)
  if not job:raise ValueError('Select a tracked job')
- if row['resolved']=='matched:'+job_id and job['status']==status:return
- store.update_job(job_id,{'status':status})
+ evidence=events.details(payload,status);timestamp=events.occurred_at(payload)
+ with store.connect() as c:
+  old=c.execute('SELECT job_id FROM application_events WHERE id=?',(update_id,)).fetchone()
+  if old and old['job_id']!=job_id:raise ValueError('This message is already matched to another application')
+  if old and row['resolved']=='matched:'+job_id:return
+  if not old:c.execute('INSERT INTO application_events VALUES(?,?,?,?,?)',(update_id,job_id,json.dumps(evidence),timestamp,store.now()))
+ label=evidence['label'];specific=label!=status
+ if change_stage:
+  last=next((h['event'].removeprefix('Status: ') for h in store.history(job_id) if h['event'].startswith('Status: ')), '')
+  store.update_job(job_id,{'status':status},stage_label=label if specific and last!=label else None)
  with store.connect() as c:c.execute('UPDATE email_updates SET resolved=? WHERE id=?',('matched:'+job_id,update_id))
- alerts.enqueue('email:'+update_id,'JobTrackr application update',f"{job['company']} — {job['title']}\nStatus: {status}\nUpdated from an application email. Sheet sync follows automatically.",alerts.base()+'/#applications')
+ # Backfill evidence belongs in the timeline, not a burst of old notifications.
+ recent=(datetime.now(timezone.utc)-datetime.fromisoformat(timestamp)).total_seconds()<7*86400
+ if recent and change_stage and (job['status']!=status or specific):
+  alerts.enqueue('email:'+update_id,'JobTrackr application update',f"{job['company']} — {job['title']}\n{label}\n{payload.get('subject','')}\nUpdated from an application email. Sheet sync follows automatically.",alerts.base()+'/#applications')
 
 def decode(value):
  try:return str(make_header(decode_header(value or '')))
@@ -133,6 +142,18 @@ def message_body(message):
   parts.append(plain(text) if part.get_content_type()=='text/html' else text)
  return '\n'.join(parts)[:30000]
 
+def mailbox_folder(client):
+ configured=os.getenv('JOBTRACKR_IMAP_FOLDER','')
+ if configured:return configured
+ # Gmail All Mail includes archived/labelled received mail; never Spam or Trash.
+ result=client.list()
+ if isinstance(result,tuple) and len(result)==2 and result[0]=='OK':
+  for raw in result[1] or []:
+   if isinstance(raw,bytes) and b'\\All' in raw:
+    found=re.search(rb'"([^"\n]+)"\s*$',raw)
+    if found:return '"'+found.group(1).decode('ascii')+'"'
+ return 'INBOX'
+
 def poll():
  user=os.getenv('JOBTRACKR_IMAP_USER','');password=os.getenv('JOBTRACKR_IMAP_PASSWORD','').replace(' ','');host=os.getenv('JOBTRACKR_IMAP_HOST','imap.gmail.com')
  if not user or not password:
@@ -140,32 +161,46 @@ def poll():
  if not LOCK.acquire(blocking=False):return
  client=None
  try:
-  client=imaplib.IMAP4_SSL(host,timeout=20);client.login(user,password);client.select('INBOX',readonly=True)
+  client=imaplib.IMAP4_SSL(host,timeout=20);client.login(user,password);folder=mailbox_folder(client)
+  selected=client.select(folder,readonly=True)
+  if isinstance(selected,tuple) and selected[0]!='OK':raise ValueError('Mailbox folder unavailable')
   validity=(client.response('UIDVALIDITY')[1] or [b'unknown'])[0]
-  account=hashlib.sha256((host+'|'+user+'|'+str(validity)).encode()).hexdigest()[:16]
-  since=(datetime.now(timezone.utc)-timedelta(days=14)).strftime('%d-%b-%Y')
-  typ,data=client.uid('search',None,'SINCE',since)
+  account=hashlib.sha256((host+'|'+user).encode()).hexdigest()[:16]
+  cursor_key='mail_cursor:'+hashlib.sha256((account+'|'+folder+'|'+str(validity)).encode()).hexdigest()[:24]
+  cursor=store.setting(cursor_key,0)
+  if cursor:typ,data=client.uid('search',None,'UID',str(cursor+1)+':*')
+  else:
+   days=max(14,min(365,int(os.getenv('JOBTRACKR_MAIL_LOOKBACK_DAYS','90'))))
+   since=(datetime.now(timezone.utc)-timedelta(days=days)).strftime('%d-%b-%Y')
+   typ,data=client.uid('search',None,'SINCE',since)
   if typ!='OK':raise ValueError('Mailbox search failed')
-  for uid in (data[0] or b'').split()[-100:]:
-   mid=account+':'+uid.decode()
-   with store.connect() as c:seen=c.execute('SELECT 1 FROM email_updates WHERE id=?',(mid,)).fetchone()
-   if seen:continue
-   typ,raw=client.uid('fetch',uid,'(BODY.PEEK[])')
-   if typ!='OK':continue
+  uids=sorted({int(uid) for uid in (data[0] or b'').split() if int(uid)>cursor})
+  batch=max(1,min(500,int(os.getenv('JOBTRACKR_MAIL_BATCH_SIZE','200'))));processed=0
+  for numeric_uid in uids[:batch]:
+   uid=str(numeric_uid).encode();typ,raw=client.uid('fetch',uid,'(BODY.PEEK[])')
+   if typ!='OK':raise ValueError('Message fetch incomplete; checkpoint retained')
    payload=next((x[1] for x in raw if isinstance(x,tuple)),None)
-   if not payload:continue
-   message=email.message_from_bytes(payload);subject=decode(message['Subject']);sender=decode(message['From']);body=message_body(message)
-   decision=match_message(subject,sender,body,store.jobs())
-   record={'subject':subject[:300],'sender':sender[:300],'date':decode(message['Date'])[:100],'snippet':body[:4000] if decision.status else '', 'status':decision.status,'candidates':list(decision.candidates),'reason':decision.reason,'company':employer_from_email(subject,sender,body),'title':role_from_email(subject,body)}
-   resolved='ignored' if not decision.status else ''
-   if not decision.status:record={'status':'','reason':'Not an application update'}
-   with store.connect() as c:c.execute('INSERT OR IGNORE INTO email_updates VALUES(?,?,?,?)',(mid,json.dumps(record),resolved,store.now()))
-   if decision.certain:
-    job=next(j for j in store.jobs() if j['id']==decision.job_id)
-    advance_update(mid,job,decision.status)
-  reconcile_updates()
-  store.set_setting('mail_health',{'connected':True,'last_checked':store.now(),'message':'Mailbox checked. Ambiguous matches await review.'})
- except (imaplib.IMAP4.error,OSError,ValueError):store.set_setting('mail_health',{'connected':False,'message':'Mailbox connection failed. Check the separate JobTrackr credentials.','last_checked':store.now()})
+   if not payload:raise ValueError('Empty message fetch; checkpoint retained')
+   message=email.message_from_bytes(payload);message_id=message.get('Message-ID','').strip()
+   mid=account+':'+hashlib.sha256((message_id or folder+'|'+str(validity)+'|'+str(numeric_uid)).encode()).hexdigest()[:32]
+   with store.connect() as c:seen=c.execute('SELECT 1 FROM email_updates WHERE id=?',(mid,)).fetchone()
+   if not seen:
+    subject=decode(message['Subject']);sender=decode(message['From']);body=message_body(message)
+    decision=match_message(subject,sender,body,store.jobs()) if parseaddr(sender)[1].lower()!=user.lower() else Match('',reason='Outgoing email')
+    if decision.certain and decision.reason=='Single recorded application for this employer':
+     matched=next(j for j in store.jobs() if j['id']==decision.job_id)
+     age=(datetime.fromisoformat(matched['created'])-datetime.fromisoformat(events.occurred_at({'date':decode(message['Date'])}))).total_seconds()
+     if age>14*86400:decision.certain=False;decision.reason='Older employer-only email; confirm which role it belongs to'
+    record={'subject':subject[:300],'sender':sender[:300],'date':decode(message['Date'])[:100],'snippet':body[:30000] if decision.status else '', 'status':decision.status,'candidates':list(decision.candidates),'reason':decision.reason,'company':employer_from_email(subject,sender,body),'title':role_from_email(subject,body)}
+    resolved='ignored' if not decision.status else ''
+    if not decision.status:record={'status':'','reason':'Not an application update'}
+    with store.connect() as c:c.execute('INSERT OR IGNORE INTO email_updates VALUES(?,?,?,?)',(mid,json.dumps(record),resolved,store.now()))
+    if decision.certain:
+     job=next(j for j in store.jobs() if j['id']==decision.job_id);advance_update(mid,job,decision.status)
+   store.set_setting(cursor_key,numeric_uid);processed+=1
+  reconcile_updates();remaining=max(0,len(uids)-processed)
+  store.set_setting('mail_health',{'connected':True,'last_checked':store.now(),'folder':folder.strip('"'),'remaining':remaining,'message':f'Mailbox checked without marking messages read. {remaining} messages awaiting the next batch.' if remaining else 'Mailbox checked without marking messages read. Uncertain matches await review.'})
+ except (imaplib.IMAP4.error,OSError,ValueError):store.set_setting('mail_health',{'connected':False,'message':'Email check interrupted; saved checkpoints will retry automatically.','last_checked':store.now()})
  finally:
   if client:
    try:client.logout()
@@ -176,4 +211,4 @@ def loop(stop):
  while not stop.is_set():
   try:poll()
   except Exception:store.set_setting('mail_health',{'connected':False,'message':'Email check failed; will retry.'})
-  stop.wait(300)
+  stop.wait(10 if store.setting('mail_health',{}).get('remaining',0) else 300)

@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from . import network
 from .store import DATA_DIR, atomic_write_json, load_json_safe
 
 CACHE_FILE = str(DATA_DIR / 'listing_checks.json')
@@ -46,6 +47,35 @@ def job_postings(markup):
         except (ValueError, TypeError): continue
 
 
+def salary_text(value):
+    if not isinstance(value,dict): return ''
+    amount=value.get('value') or {}
+    if not isinstance(amount,dict): amount={'value':amount}
+    low=amount.get('minValue',amount.get('value'));high=amount.get('maxValue')
+    if low is None: return ''
+    currency='£' if value.get('currency')=='GBP' else str(value.get('currency',''))+' '
+    def fmt(number):
+        try:return f'{float(number):,.0f}'
+        except (ValueError,TypeError):return str(number)
+    return currency+fmt(low)+((' – '+currency+fmt(high)) if high is not None and high!=low else '')+' / '+str(amount.get('unitText','')).lower()
+
+
+def application_link(soup, url):
+    from urllib.parse import urljoin
+    main=soup.find('main') or soup
+    # Exclude recommendations and global navigation before looking for Apply.
+    for node in main.select('nav,footer,.similar-jobs,.recommended-jobs'):node.decompose()
+    for node in main.select('a[href],form[action]'):
+        text=node.get_text(' ',strip=True)
+        target=urljoin(url,node.get('href') or node.get('action'))
+        host=urlparse(target).hostname or ''
+        label=text+' '+target
+        known=any(host.endswith(x) for x in ('.tal.net','.myworkdayjobs.com','greenhouse.io','lever.co','smartrecruiters.com','kpmgcareers.co.uk','.careers.hibob.com'))
+        if known and re.search(r'apply|instant=apply',label,re.I) and len(urlparse(target).path.strip('/').split('/'))>=2:
+            return target
+    return ''
+
+
 def posting_fields(post):
     locations = post.get('jobLocation') or []
     if isinstance(locations, dict): locations = [locations]
@@ -62,6 +92,9 @@ def posting_fields(post):
             'location': ', '.join(dict.fromkeys(cities + countries)),
             'description': plain(post.get('description')), 'country': ', '.join(dict.fromkeys(countries)),
             'closing_date': post.get('validThrough', ''), 'published_at': post.get('datePosted', ''),
+            'salary': salary_text(post.get('baseSalary')),
+            'employer_url': company.get('sameAs') or company.get('url') or '',
+            'requisition_id': str((post.get('identifier') or {}).get('value','')) if isinstance(post.get('identifier'),dict) else '',
             'employment_type': ', '.join(post.get('employmentType', [])) if isinstance(post.get('employmentType'), list) else post.get('employmentType', '')}
 
 
@@ -79,7 +112,7 @@ def _workday(url):
     if idx < 1: return None
     tenant = parsed.hostname.split('.')[0]
     site = parts[idx - 1]
-    r = requests.get(f'https://{parsed.hostname}/wday/cxs/{tenant}/{site}/' + '/'.join(parts[idx:]), headers=HEADERS, timeout=10)
+    r = network.get(f'https://{parsed.hostname}/wday/cxs/{tenant}/{site}/' + '/'.join(parts[idx:]), headers=HEADERS, timeout=10)
     if r.status_code != 200: return None
     info = r.json().get('jobPostingInfo') or {}
     if not info.get('title') or not info.get('jobDescription'): return None
@@ -111,13 +144,13 @@ def _check(url, expected_title=''):
         wd = _workday(url)
         if wd:
             return wd if title_matches(expected_title, wd.get('title', '')) else _result('unknown', 'Employer detail title does not match the requested job')
-        r = requests.get(url, headers=HEADERS, timeout=10, allow_redirects=True)
+        r = network.get(url, headers=HEADERS, timeout=10, allow_redirects=True)
         if r.status_code in (404, 410): return _result('closed', f'HTTP {r.status_code}')
         if not 200 <= r.status_code < 300: return _result('unknown', f'HTTP {r.status_code}; cannot verify')
         soup = BeautifulSoup(r.text, 'html.parser')
         for script in soup.find_all(['script', 'style', 'nav', 'footer']): script.decompose()
         text = soup.get_text(' ', strip=True).lower()
-        if any(p in text for p in ('verify you are human', 'checking your browser', 'access denied', 'enable javascript and cookies')):
+        if any(p in text for p in ('verify you are human', 'checking your browser', 'access denied', 'enable javascript and cookies', 'quick check needed')):
             return _result('unknown', 'Access challenge; cannot verify')
         # Whole-page proximity previously mistook unrelated footer/description text
         # for closure. These explicit phrases must refer to the current posting.
@@ -131,7 +164,7 @@ def _check(url, expected_title=''):
             if fields['title'] and fields['description']:
                 if not title_matches(expected_title, fields['title']):
                     return _result('unknown', 'JobPosting title does not match the requested job', final_url=r.url)
-                return _result('verified', 'Specific JobPosting with job description', final_url=r.url, **fields)
+                return _result('verified', 'Specific JobPosting with job description', final_url=r.url, apply_url=application_link(BeautifulSoup(r.text,'html.parser'),r.url), **fields)
         headings = ' '.join(h.get_text(' ', strip=True) for h in soup.find_all(['h1', 'h2'])).lower()
         title_tokens = [w for w in re.findall(r'[a-z]+', expected_title.lower()) if len(w) > 3 and w not in {'summer', 'programme', 'program', 'internship'}]
         matches = sum(w in headings for w in title_tokens)
@@ -143,6 +176,7 @@ def _check(url, expected_title=''):
             description_node = soup.select_one('.job__description, #content, .posting-page .section-wrapper')
             title_node = soup.find('h1')
             return _result('verified', 'Matching job heading and application control', final_url=r.url,
+                           apply_url=application_link(BeautifulSoup(r.text,'html.parser'),r.url),
                            location=location_node.get_text(' ', strip=True) if location_node else '',
                            title=title_node.get_text(' ', strip=True) if title_node else expected_title,
                            description=(description_node or soup).get_text(' ', strip=True)[:14000])

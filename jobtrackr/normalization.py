@@ -302,3 +302,45 @@ def canonical_url(url):
     parsed=urlsplit(str(url).strip())
     query=[(k,v) for k,v in parse_qsl(parsed.query) if k.lower() in {'gh_jid','jobid','job','jid','reqid','requisitionid','vacancyid'}]
     return urlunsplit((parsed.scheme,parsed.netloc,parsed.path.rstrip('/'),urlencode(sorted(query)),''))
+
+def vacancy_identity(job):
+    """Employer ATS identity, independent of a board or a session-specific Apply URL."""
+    for url in (job.get('apply_url',''),job.get('link','')):
+        parsed=urlsplit(url);host=(parsed.hostname or '').lower();path=parsed.path
+        if host.endswith('.tal.net'):
+            found=re.search(r'/opp/(\d+)',path,re.I)
+            if found:return 'tal:'+host+':'+found.group(1)
+        if host.endswith('.myworkdayjobs.com'):
+            found=re.search(r'_([A-Za-z]*\d+)(?:/apply)?/?$',path)
+            if found:return 'wd:'+host.split('.')[0]+':'+found.group(1).lower()
+        native=extract_ats_post_id(url)
+        if native:return native
+        if host.endswith('smartrecruiters.com'):
+            found=re.search(r'/([^/]+)/(\d+)',path)
+            if found:return 'smart:'+found.group(1).lower()+':'+found.group(2)
+    return ''
+
+def finance_same_listing(a,b):
+    links_a=[a.get('link',''),a.get('apply_url',''),*a.get('alternate_links',[])]
+    links_b=[b.get('link',''),b.get('apply_url',''),*b.get('alternate_links',[])]
+    if set(normalize_url(x) for x in links_a if x)&set(normalize_url(x) for x in links_b if x):return True
+    native_a,native_b=vacancy_identity(a),vacancy_identity(b)
+    if native_a and native_b:return native_a==native_b
+    if normalize_company(a.get('company'))!=normalize_company(b.get('company')):return False
+    # Keep locations, intakes and separate requisitions distinct. Only identical
+    # advert text at the same location can merge without an employer-native ID.
+    def words(value):return re.sub(r'[^a-z0-9]+',' ',str(value or '').lower()).strip()
+    if words(a.get('title'))!=words(b.get('title')) or words(a.get('location'))!=words(b.get('location')):return False
+    text_a,text_b=words(a.get('description')),words(b.get('description'))
+    return len(text_a)>300 and text_a==text_b and a.get('salary','')==b.get('salary','')
+
+def collapse_finance_jobs(jobs):
+    groups=[]
+    def priority(job):return (job.get('status') not in ('New','Saved','Dismissed'),job.get('route_type')=='Direct employer',bool(job.get('apply_url')))
+    for job in sorted(jobs,key=priority,reverse=True):
+        duplicate=next((other for other in groups if finance_same_listing(job,other)),None)
+        if duplicate:
+            duplicate.setdefault('alternate_links',[])
+            duplicate['alternate_links']=list(dict.fromkeys(duplicate['alternate_links']+[job.get('link','')]+job.get('alternate_links',[])))
+        else:groups.append(dict(job))
+    return groups

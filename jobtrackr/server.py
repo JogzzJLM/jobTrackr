@@ -33,6 +33,8 @@ class Handler(BaseHTTPRequestHandler):
    from plotly.offline import get_plotlyjs
    return self.reply(get_plotlyjs(),mime='text/javascript; charset=utf-8')
   if path=='/api/health':return self.reply({'ok':True,'version':'finance-graduate-v1','scan':store.setting('scan',{})})
+  if path.startswith('/api/events/'):
+   return self.reply(store.application_events(path.rsplit('/',1)[-1]))
   if path.startswith('/api/history/'):
    return self.reply(store.history(path.rsplit('/',1)[-1]))
   if path=='/api/export':
@@ -89,6 +91,7 @@ def main():
  stop=threading.Event();server=ThreadingHTTPServer(('0.0.0.0',int(os.getenv('PORT','5001'))),Handler)
  if os.getenv('DISABLE_SCHEDULER')!='1':
   threading.Thread(target=discovery.loop,args=(stop,),daemon=True).start()
+  threading.Thread(target=alerts.loop,args=(stop,),daemon=True).start()
   threading.Thread(target=mail.loop,args=(stop,),daemon=True).start()
   threading.Thread(target=sheets.loop,args=(stop,),daemon=True).start()
  print('JobTrackr finance graduate dashboard is ready',flush=True)

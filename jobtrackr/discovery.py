@@ -8,16 +8,16 @@ import time
 from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
-from . import store, alerts
+from . import store, alerts, network
 from .eligibility import evaluate, displayable
 from .normalization import normalize_url, canonical_url, clean_company_display_name
-from .verifier import verify_listing, plain, deadline_date
+from .verifier import verify_listing, plain, deadline_date, application_link
 SCAN_INTERVAL=max(300,int(os.getenv("SCRAPER_INTERVAL_SECONDS","300")))
 SCAN_LOCK=threading.Lock()
 HEADERS={'User-Agent':'Mozilla/5.0','Accept':'text/html,application/xhtml+xml'}
 
 def get(url):
- r=requests.get(url,headers=HEADERS,timeout=20);r.raise_for_status();return r
+ r=network.get(url,headers=HEADERS,timeout=20);r.raise_for_status();return r
 
 def candidate(company,title,location,link,source,description='',**extra):
  return {'company':clean_company_display_name(company) if company else '', 'title':title,'location':location,'link':canonical_url(link),'source':source,'description':plain(description),**extra}
@@ -92,8 +92,25 @@ def smart(company):
   results.append(j)
  return results
 
+def kpmg():
+ result=[];url='https://www.kpmgcareers.co.uk/search/vacancies?intakeType=Student&page=1&searchText=graduate'
+ visited=set()
+ for _ in range(20):
+  if url in visited:break
+  visited.add(url);soup=BeautifulSoup(get(url).text,'html.parser')
+  for a in soup.select('a.view-job-description[href]'):
+   card=a.find_parent('div',class_='col');title=card.find('h3') if card else None
+   if not title:continue
+   location=card.select_one('.vacancy-location b')
+   result.append(candidate('KPMG',title.get_text(' ',strip=True),location.get_text(' ',strip=True) if location else '',urljoin(url,a['href']),'KPMG employer feed',country='GB'))
+  next_link=next((a for a in soup.select('a[href]') if a.get_text(' ',strip=True)=='Next'),None)
+  if not next_link:break
+  url=urljoin(url,next_link['href']).replace('http://','https://',1)
+ return result
+
+
 def sources():
- return [('BDO employer feed',bdo_workday),
+ return [('BDO employer feed',bdo_workday),('KPMG employer feed',kpmg),
  ('Accountancy Careers',lambda:board('Accountancy Careers','https://www.accountancycareers.co.uk/search/jobs/',r'/jobs/[^/]+/',pages=5)),
  ('Graduate-jobs.com accounting',lambda:board('Graduate-jobs.com accounting','https://www.graduate-jobs.com/jobs/accounting',r'/job/',pages=5)),
  *[(f'Graduate-jobs.com {area}',lambda area=area:board(f'Graduate-jobs.com {area}',f'https://www.graduate-jobs.com/jobs/{area}',r'/job/',pages=5)) for area in ('finance','banking')],
@@ -115,6 +132,9 @@ def _enrich(job,force=False):
    if main and apply and main.select_one('.job-details') and soup.title and job['title'].lower() in soup.title.get_text().lower() and len(main.get_text())>500:
     check={'state':'verified','reason':'Employer job description and specific application link','checked_at':store.now(),'title':soup.title.get_text(' ',strip=True),'description':main.get_text(' ',strip=True),'final_url':job['link']}
     job['apply_url']=apply
+    target_check=verify_listing(apply.split('?')[0],job['title'],force=force)
+    job['application_verification']={k:target_check.get(k) for k in ('state','reason','checked_at')}
+    if target_check['state']=='closed':return job,target_check
   except requests.RequestException:pass
  if check['state']=='unknown' and job['source']=='Accountancy Careers':
   try:
@@ -123,7 +143,7 @@ def _enrich(job,force=False):
    applies=[a for a in soup.select('a[href]') if re.search(r'apply',a.get_text(' ',strip=True),re.I)]
    content=description.get_text(' ',strip=True) if description else ''
    if description and employer and applies and job['title'].lower() in title and len(content)>300 and not re.search(r'(vacancy (?:has )?closed|no longer accepting|applications (?:have )?closed)',content,re.I):
-    check={'state':'verified','reason':'Specific accountancy vacancy, employer, full description and apply control','checked_at':store.now(),'description':content,'final_url':job['link']}
+    check={'state':'verified','reason':'Specific accountancy vacancy, employer, full description and apply control','checked_at':store.now(),'description':content,'final_url':job['link'],'apply_url':application_link(soup,job['link'])}
   except requests.RequestException:pass
  if check['state']!='verified':return job,check
  if job['source']=='Sanctuary graduates':
@@ -138,7 +158,7 @@ def _enrich(job,force=False):
    if employer:job['company']=employer.group(1)
    elif ' with ' in job['title']:job['company']=job['title'].split(' with ',1)[1]
   except requests.RequestException:pass
- for key in ('title','company','location','country','description','published_at'):
+ for key in ('title','company','location','country','description','published_at','salary','requisition_id','employer_url','apply_url'):
   if check.get(key):job[key]=check[key]
  if job['source']=='Accountancy Careers':
   try:
@@ -167,20 +187,28 @@ def _enrich(job,force=False):
     job['verification_url']=job.get('verification_url') or job['link'];job['apply_url']=apply;job['link']=canonical_url(apply).removesuffix('/apply')
    if node:job['description']=node.get_text(' ',strip=True)
   except requests.RequestException:pass
+ if job.get('apply_url') and not job.get('application_verification'):
+  target_check=verify_listing(job['apply_url'],job['title'],force=force)
+  job['application_verification']={k:target_check.get(k) for k in ('state','reason','checked_at')}
+  if target_check['state']=='closed':return job,target_check
  job['company']=clean_company_display_name(job.get('company',''))
+ host=urlparse(job.get('verification_url') or job['link']).hostname or ''
+ agency=bool(re.search(r'\b(recruit(?:ment)?|recruiting|resourcing|hays|reed|robert half|talent|career centre|consula|staffing|employment)\b',job['company'],re.I))
+ job['route_type']='Recruiter advert' if agency else 'Job board advert' if host.endswith(('reed.co.uk','graduate-jobs.com','accountancycareers.co.uk','sanctuarygraduates.co.uk','accaglobal.com')) else 'Direct employer'
+ job['route_note']='Employer/client not independently confirmed' if agency else 'Employer vacancy page' if job['route_type']=='Direct employer' else 'Public advert; employer confirmation not established'
  return job,check
 
 _ENRICH_CACHE_LOCK=threading.RLock()
 def enrich(job,force=False):
  cache_path=store.DATA_DIR/'enriched_listings.json';key=job['link']
  with _ENRICH_CACHE_LOCK:cached=store.load_json_safe(cache_path,{}).get(key)
- if cached and not force:
+ if cached and not force and cached.get('version')==2:
   ttl=1800 if cached['check']['state'] in ('verified','closed') else 300
   if time.time()-cached['saved_at']<ttl:return {**job,**cached['job']},dict(cached['check'])
  result,check=_enrich(job,force=force)
  with _ENRICH_CACHE_LOCK:
   cache=store.load_json_safe(cache_path,{})
-  cache[key]={'saved_at':time.time(),'job':{k:v for k,v in result.items() if k not in ('status','notes','reminder','created','updated')},'check':check}
+  cache[key]={'version':2,'saved_at':time.time(),'job':{k:v for k,v in result.items() if k not in ('status','notes','reminder','created','updated')},'check':check}
   cache=dict(sorted(cache.items(),key=lambda item:item[1]['saved_at'],reverse=True)[:2000])
   store.atomic_write_json(cache_path,cache)
  return result,check
@@ -196,7 +224,7 @@ def scan():
    for future in concurrent.futures.as_completed(futures):
     name=futures[future]
     try:
-     rows=future.result();candidates.extend(rows);health[name]={'ok':True,'candidates':len(rows),'checked_at':store.now()}
+     rows=future.result();rows=[{**j,'feed_name':name} for j in rows];candidates.extend(rows);health[name]={'ok':True,'candidates':len(rows),'relevant_candidates':sum(evaluate(j)['state']!='filtered' for j in rows),'verified':0,'unconfirmed':0,'closed':0,'filtered':sum(evaluate(j)['state']=='filtered' for j in rows),'checked_at':store.now()}
     except Exception as exc:health[name]={'ok':False,'error':f'Feed unavailable ({type(exc).__name__}); will retry','checked_at':store.now()}
   # Imported legacy jobs are candidates only: never shown as verified blindly.
   if not store.setting('legacy_reviewed',False):
@@ -209,7 +237,11 @@ def scan():
    if not displayable(decision):
     existing['verification']={'state':decision['state'],'reason':'; '.join(decision['requirements']),'checked_at':store.now()};store.upsert(existing)
   candidates.extend({k:v for k,v in j.items() if k not in ('status','notes','reminder','created','updated')} for j in store.jobs() if j.get('link'))
-  unique={normalize_url(j['link']):j for j in candidates if j.get('link') and evaluate(j)['state']!='filtered'}
+  unique={}
+  for j in candidates:
+   if not j.get('link') or evaluate(j)['state']=='filtered':continue
+   key=normalize_url(j['link']);previous=unique.get(key,{})
+   unique[key]={**j,**({'feed_name':previous['feed_name']} if previous.get('feed_name') else {})}
   with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
    futures={pool.submit(enrich,j):j for j in unique.values()}
    for future in concurrent.futures.as_completed(futures):
@@ -217,6 +249,13 @@ def scan():
     try:job,verification=future.result()
     except Exception:store.review(original,'Could not retrieve listing; will retry','unknown');continue
     decision=evaluate(job)
+    source_name=job.get('feed_name') or job.get('source')
+    source_info=health.get(source_name)
+    if not source_info:
+     source_info=next((info for name,info in health.items() if name.lower()==str(source_name).lower()),None)
+    if source_info is not None:
+     outcome='closed' if verification['state']=='closed' else 'verified' if verification['state']=='verified' and displayable(decision) else 'filtered' if decision['state']=='filtered' else 'unconfirmed'
+     source_info[outcome]=source_info.get(outcome,0)+1
     if verification['state']!='verified' or not displayable(decision):
      reason='; '.join(decision['requirements']) if decision['requirements'] else verification.get('reason','Cannot confirm')
      store.review(job,reason,decision['state'] if decision['state']!='eligible' else verification['state'])
@@ -244,5 +283,4 @@ def loop(stop):
  scan()
  last=time.time()
  while not stop.wait(60):
-  alerts.scheduled()
   if time.time()-last>=SCAN_INTERVAL:scan();last=time.time()
