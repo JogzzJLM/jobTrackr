@@ -156,12 +156,12 @@ class DiscoveryFirstTests(unittest.TestCase):
    with patch('jobtrackr.sheets.requests.post',side_effect=ConnectionError):self.assertFalse(sheets.sync())
    self.assertEqual(store.setting('sheet_fingerprint'),'')
    with patch('jobtrackr.sheets.requests.post') as post:
-    post.return_value.json.return_value={'ok':True,'count':1,'layout':'applications-v2'}
-    self.assertTrue(sheets.sync());self.assertTrue(sheets.sync());self.assertEqual(post.call_count,1)
+    post.return_value.json.return_value={'ok':True,'count':1,'layout':'applications-v3','applications':[]}
+    self.assertTrue(sheets.sync());self.assertTrue(sheets.sync());self.assertEqual(post.call_count,2)
  def test_sheet_does_not_ack_partial_write(self):
   from jobtrackr import sheets
   with patch.dict(os.environ,{'GOOGLE_SHEET_WEBHOOK_URL':'https://example.org/exec','GOOGLE_SHEET_SYNC_TOKEN':'test-only'}),patch('jobtrackr.sheets.snapshot',return_value=[{'id':'partial'}]),patch('jobtrackr.sheets.requests.post') as post:
-   store.set_setting('sheet_fingerprint','');post.return_value.json.return_value={'ok':True,'count':0,'layout':'applications-v2'}
+   store.set_setting('sheet_fingerprint','');post.return_value.json.return_value={'ok':True,'count':0,'layout':'applications-v3','applications':[]}
    self.assertFalse(sheets.sync());self.assertEqual(store.setting('sheet_fingerprint'),'')
  def test_flow_uses_recorded_transitions_without_inventing_assessment(self):
   from jobtrackr import flow
@@ -208,3 +208,16 @@ class ApplicationsOnlySheetTests(unittest.TestCase):
   store.set_setting('sheet_fingerprint','')
   with patch.dict(os.environ,{'GOOGLE_SHEET_WEBHOOK_URL':'https://example.org/exec','GOOGLE_SHEET_SYNC_TOKEN':'test-only'}),patch('jobtrackr.sheets.snapshot',return_value=[]),patch('jobtrackr.sheets.requests.post') as post:
    post.return_value.json.return_value={'ok':True,'count':0};self.assertFalse(sheets.sync())
+
+class SheetReadbackTests(unittest.TestCase):
+ def test_manual_sheet_stages_update_tracker_and_flow(self):
+  from jobtrackr import sheets,flow
+  job_id=store.application_from_email('sheet-readback','RSM','Graduate Tax Trainee');store.update_job(job_id,{'status':'Applied'})
+  rows=[{'id':job_id,'company':'RSM','title':'Graduate Tax Trainee','stages':['Applied','Online assessment','Interview 1']}]
+  sheets.import_applications(rows)
+  self.assertEqual(next(j for j in store.jobs() if j['id']==job_id)['status'],'Interview')
+  self.assertEqual(next(j for j in sheets.snapshot() if j['id']==job_id)['stages'],rows[0]['stages'])
+  self.assertEqual(flow.sheet_counts(rows)[('Online assessment','Interview 1')],1)
+ def test_blank_sheet_rows_do_not_create_applications(self):
+  from jobtrackr import sheets
+  before=len(store.jobs());sheets.import_applications([{'company':'','title':'','stages':[]}]);self.assertEqual(len(store.jobs()),before)

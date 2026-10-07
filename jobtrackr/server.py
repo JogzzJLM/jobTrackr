@@ -25,7 +25,7 @@ class Handler(BaseHTTPRequestHandler):
   if path in ('/assets/style.css','/assets/app.js'):
    return self.reply((ROOT/path.split('/')[-1]).read_bytes(),mime='text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8')
   if path=='/api/state':
-   data={'jobs':store.jobs(),'scan':store.setting('scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'scan_interval':discovery.SCAN_INTERVAL,'sheet_url':sheets.edit_url(),'sheets':store.setting('sheet_health',{})}
+   data={'jobs':store.jobs(),'scan':store.setting('scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'scan_interval':discovery.SCAN_INTERVAL,'sheet_url':sheets.edit_url(),'flow_version':hashlib.sha256(json.dumps(store.setting('sheet_rows',sheets.snapshot()),sort_keys=True).encode()).hexdigest()[:12],'sheets':store.setting('sheet_health',{})}
    with store.connect() as c:data['pending_notifications']=c.execute('SELECT COUNT(*) FROM outbox WHERE delivered IS NULL').fetchone()[0]
    return self.reply(data)
   if path=='/sankey-embed':return self.reply(flow.html(),mime='text/html; charset=utf-8')
