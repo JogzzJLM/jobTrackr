@@ -5,3 +5,14 @@ assert.equal(group([role('1','London'),role('2','Leeds',2026),role('3','Leeds',2
 assert.equal(group([{...role('1','London'),route_type:'Recruiter advert'},{...role('2','Leeds'),route_type:'Recruiter advert'}]).length,2);
 assert.equal(group([{id:'r1',company:'RSM',title:'Audit Graduate - Leeds - September 2027',location:'Leeds',route_type:'Direct employer'},{id:'r2',company:'RSM',title:'Audit Graduate - London - September 2027',location:'London',route_type:'Direct employer'}]).length,1);
 console.log('Grouped programme and location tests passed');
+const direct=(id,title,location,company='Example')=>({id,title,location,company,route_type:'Direct employer'});
+assert.equal(group([direct('b1','2027 Audit Graduate Programme - London','London, United Kingdom','BDO'),direct('b2','2027 Audit Graduate Programme - Midlands','Nottingham, United Kingdom','BDO'),direct('b3','2027 Audit Graduate Programme – North East & West','Manchester','BDO'),direct('b4','2027 Audit Graduate Programme - Scotland','Glasgow, Edinburgh, Scotland, United Kingdom','BDO')]).length,1);
+assert.equal(group([direct('a','Tax Graduate - London - September 2027','London'),direct('b','Tax Graduate - Milton Keynes - September 2027','milton-keynes'),direct('c','Tax Graduate - Gatwick - September 2027','crawley'),direct('d','Tax Graduate - Stoke - September 2027','stoke-on-trent')]).length,1);
+assert.equal(group([direct('a','Accountant (London)','London, England'),direct('b','Accountant (Leeds)','Leeds')]).length,1);
+assert.equal(group([direct('a','Graduate Audit - September 2027','London'),direct('b','Graduate Audit - January 2027','Leeds'),direct('c','Graduate Audit - September 2026','Bristol'),direct('d','Graduate Audit Technology - September 2027','Bristol')]).length,4);
+assert.equal(group([direct('a','London Market Analyst','London'),direct('b','Market Analyst','Leeds')]).length,2);
+assert.equal(group([direct('a','Senior Accountant','London'),direct('b','Accountant','Leeds'),direct('c','Accountant','Leeds','Other')]).length,3);
+assert.equal(group([direct('a','ACA Graduate - London','London'),direct('b','ACCA Graduate - Leeds','Leeds')]).length,2);
+assert.equal(group([direct('a','London','London'),direct('b','Leeds','Leeds')]).length,2);
+assert.equal(group([direct('a','Accountant',''),direct('b','Accountant','Leeds')]).length,2);
+console.log('Employer-independent grouping and non-merge safeguards passed');
