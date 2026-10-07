@@ -175,7 +175,12 @@ def _enrich(job,force=False):
    elif ' with ' in job['title']:job['company']=job['title'].split(' with ',1)[1]
   except requests.RequestException:pass
  for key in ('title','company','location','country','description','published_at','salary','requisition_id','employer_url','apply_url'):
+  if key=='location' and str(check.get(key,'')).lower() in ('location not specified','not specified','unknown'):continue
   if check.get(key):job[key]=check[key]
+ if job.get('source')=='KPMG employer feed' and job.get('apply_url'):
+  from urllib.parse import parse_qs
+  location=parse_qs(urlparse(job['apply_url']).query).get('location',[''])[0]
+  if location:job['location']=location
  if job['source']=='Accountancy Careers':
   try:
    soup=BeautifulSoup(get(job['link']).text,'html.parser');facts={}
