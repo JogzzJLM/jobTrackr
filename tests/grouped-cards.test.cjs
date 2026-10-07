@@ -16,3 +16,17 @@ assert.equal(group([direct('a','ACA Graduate - London','London'),direct('b','ACC
 assert.equal(group([direct('a','London','London'),direct('b','Leeds','Leeds')]).length,2);
 assert.equal(group([direct('a','Accountant',''),direct('b','Accountant','Leeds')]).length,2);
 console.log('Employer-independent grouping and non-merge safeguards passed');
+const {available}=require('../jobtrackr/assets/groups.js');
+const live=j=>({...j,status:'New',verification:{state:'verified'}});
+const london=live(direct('london','2027 Audit Graduate Programme - London','London, United Kingdom','BDO'));
+const bristol=live(direct('bristol','2027 Audit Graduate Programme - South West','Bristol','BDO'));
+const tax=live(direct('tax','2027 Tax Graduate Programme - London','London','BDO'));
+for(const status of ['Applied','Assessment','Interview','Offer','Rejected','Withdrawn']){
+ const jobs=[{...london,status},bristol,tax];
+ assert.deepEqual(available(jobs).map(j=>j.id),['tax']);
+ assert.deepEqual(available(jobs,true).map(j=>j.id),['bristol','tax']);
+ assert.equal(jobs[0].status,status);
+}
+assert.deepEqual(available([{id:'email',company:'BDO',title:'2027 Audit Graduate Programme - London',location:'London',status:'Applied',route_type:'Application email'},london,bristol,tax]).map(j=>j.id),['tax']);
+assert.deepEqual(available([london,{...bristol,status:'Dismissed'},{...tax,verification:{state:'unknown'}}]).map(j=>j.id),['london']);
+console.log('Applied programmes are hidden by default without changing records');
