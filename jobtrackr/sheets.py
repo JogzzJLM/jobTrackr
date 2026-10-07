@@ -11,11 +11,14 @@ def edit_url():
  return url if urlparse(url).scheme=='https' and urlparse(url).hostname=='docs.google.com' else ''
 def snapshot(history_limit=None):
  rows=[]
- saved=store.setting('sheet_stages',{})
+ saved=store.setting('sheet_stages',{});cursors=store.setting('sheet_history_cursors',{});histories={}
+ with store.connect() as connection:
+  for event in connection.execute('SELECT id,job_id,event FROM history ORDER BY id'):
+   histories.setdefault(event['job_id'],[]).append(dict(event))
  for job in sorted(store.jobs(),key=lambda j:j['id']):
-  cursor=store.setting('sheet_history_cursors',{}).get(job['id'],0)
+  cursor=cursors.get(job['id'],0)
   stages=list(saved.get(job['id'],[]))
-  for event in reversed(store.history(job['id'])):
+  for event in histories.get(job['id'],[]):
    event_id=event.get('id',cursor+1)
    if event_id<=cursor or (history_limit is not None and event_id>history_limit.get(job['id'],0)):continue
    stage=event['event'].removeprefix('Status: ')

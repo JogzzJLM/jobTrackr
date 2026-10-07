@@ -1,4 +1,5 @@
 import re
+from functools import lru_cache
 from urllib.parse import urlsplit, parse_qsl, urlencode
 
 FINANCE_NAMES = {'pwc': 'PwC', 'pricewaterhousecoopers': 'PwC', 'bdo': 'BDO',
@@ -171,6 +172,7 @@ def extract_program_type(title):
             return "internship"
         return "graduate"
 
+@lru_cache(maxsize=8192)
 def normalize_url(url):
     """Strips query strings, tracking parameters, hashes, and trailing slashes for exact URL matching."""
     if not url or not isinstance(url, str):
@@ -316,6 +318,7 @@ def listing_links(job):
         aliases=[x for x in aliases if x==primary]
     return [primary,*aliases]+([job['apply_url']] if job.get('apply_url') and specific_application_url(job['apply_url']) else [])
 
+@lru_cache(maxsize=8192)
 def listing_link_key(url):
     if (urlsplit(url).hostname or '').lower()=='student.kpmgcareers.co.uk':
         parsed=urlsplit(url);return parsed.netloc.lower()+parsed.path.lower()+'?'+urlencode(sorted(parse_qsl(parsed.query)))
