@@ -30,3 +30,37 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
 @media(max-width:600px){#colours span{display:none}.header-actions{flex-wrap:wrap;justify-content:end}#colours{min-width:30px}.result-info{align-items:start;gap:8px}.result-actions{gap:6px;max-width:52%}.colour-option{padding:9px}}
 
 button.primary:hover{background:var(--secondary);color:#fff}
+
+/* Display type and responsive racing-inspired details, without adding card height. */
+:root{--display:'Outfit',system-ui,sans-serif;--body:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono',monospace}
+body{font-family:var(--body);background-image:radial-gradient(ellipse at top right,var(--soft),transparent 65%),linear-gradient(color-mix(in srgb,var(--border) 45%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--border) 45%,transparent) 1px,transparent 1px);background-size:auto,64px 64px,64px 64px}
+header{position:relative;background:var(--panel);border-bottom:1px solid var(--border)}
+header:after{content:'';position:absolute;bottom:-2px;left:24px;width:94px;height:3px;background:repeating-linear-gradient(120deg,var(--accent) 0 10px,transparent 10px 14px);pointer-events:none}
+.brand{font-family:var(--display);font-size:26px;letter-spacing:-1px;font-weight:800;line-height:1.05}.brand small{font-family:var(--mono);font-size:9px;font-weight:500;letter-spacing:1px;text-transform:uppercase;margin-top:4px}
+.logo{border-radius:4px;transform:skew(-8deg);font-size:24px;font-weight:900;background:linear-gradient(145deg,var(--accent),var(--secondary));box-shadow:3px 3px 0 var(--soft)}
+h2,h3,nav a,button,.header-actions a,.job-actions a{font-family:var(--display)}
+h2{font-size:25px;font-weight:800;letter-spacing:-.7px;line-height:1.15}h3{font-weight:700;letter-spacing:-.2px}
+#auto-status{font-family:var(--mono);font-size:10px;display:flex;align-items:center;gap:8px;min-height:20px;margin-bottom:6px}
+#auto-status:before{content:'';width:6px;height:6px;border-radius:50%;background:var(--secondary);flex-shrink:0;box-shadow:0 0 0 4px var(--soft)}
+.stats>div{position:relative;overflow:hidden;border-top:0;border-radius:5px;padding:10px 13px;border-left:3px solid var(--accent);background:var(--panel)}
+.stats>div:after{content:'';position:absolute;right:0;top:0;width:62px;height:100%;background:repeating-linear-gradient(120deg,transparent 0 8px,var(--soft) 8px 10px);pointer-events:none;opacity:.75}
+.stats>div:nth-child(2){border-left-color:var(--secondary)}.stats>div:nth-child(3){border-left-color:var(--warm)}.stats>div:nth-child(4){border-left-color:#277459}
+.stats small{font-family:var(--mono);font-size:9px;letter-spacing:.6px;color:var(--text)}.stats strong{position:relative;z-index:1;font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:-1.5px}
+nav{gap:7px}nav a{position:relative;border-radius:3px;font-size:15px;font-weight:700;padding:6px 14px;transition:color .18s,background .18s}
+nav a.active{background:var(--accent);color:#fff;box-shadow:3px 3px 0 var(--border)}nav a.active:after{content:'';position:absolute;right:0;top:0;border-top:7px solid var(--bg);border-left:7px solid transparent}
+.section-title{position:relative;padding-left:12px}.section-title:before{content:'';position:absolute;left:0;top:2px;bottom:2px;width:3px;background:linear-gradient(var(--accent),var(--secondary))}
+.filters{border-radius:5px}.filters label{font-family:var(--mono);font-size:10px}.filters input,.filters select{font-family:var(--body);font-size:12px}
+.job-card{position:relative;border-top:1px solid var(--border);border-radius:5px;background:var(--panel);transition:border-color .18s,box-shadow .18s,transform .18s}
+.job-card:before{content:'';position:absolute;left:12px;top:-1px;width:38px;height:3px;background:var(--accent);transform:skew(-30deg);transition:width .22s}
+.programme-card:before{background:var(--secondary)}
+.company{font-family:var(--mono);font-size:10px;color:var(--accent);font-weight:700;letter-spacing:.2px}.job-card h3{font-family:var(--display);font-size:17px;font-weight:700;line-height:1.2;margin:4px 0 6px;letter-spacing:-.35px}
+.badge{font-family:var(--mono);font-size:9px;letter-spacing:0;font-weight:500}
+.job-actions>*{font-family:var(--display);font-size:12px;font-weight:600}.job-actions a{border-radius:3px}.job-actions a:focus-visible{background:var(--accent);color:#fff}
+button,.header-actions a{border-radius:4px;transition:background .18s,transform .18s}.header-actions{font-size:13px}
+#flow-panel{background:var(--panel);border-radius:5px;border-top:1px solid var(--border);border-left:3px solid var(--secondary)}.flow-heading h2{font-size:23px}
+.result-info,.pagination{font-family:var(--mono);font-size:10px}.pagination button{font-family:var(--display);font-size:12px}
+dialog{box-shadow:10px 10px 0 color-mix(in srgb,var(--accent) 20%,transparent);border-radius:6px}dialog[open]{animation:dialog-enter .18s ease-out}
+@keyframes dialog-enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@media(hover:hover) and (pointer:fine){.job-card:hover{background:var(--panel);border-color:var(--accent);box-shadow:4px 4px 0 var(--soft);transform:translateY(-2px)}.job-card:hover:before{width:calc(100% - 24px)}.job-actions a:hover{background:var(--accent);color:#fff}nav a:not(.active):hover{background:var(--soft);color:var(--accent)}}
+@media(max-width:600px){.brand{font-size:22px}.logo{width:27px;height:27px;font-size:21px}header:after{left:12px}.header-actions{gap:4px}.header-actions button,.header-actions a{font-size:11px;padding:7px 6px}.stats strong{font-size:23px}.stats small{font-size:8px;letter-spacing:.15px}.stats>div{padding:7px 9px}.stats>div:after{width:35px}.section-title h2{font-size:23px}.flow-heading h2{font-size:20px}nav a{font-size:13px;padding:8px 3px}.job-card h3{font-size:16px}#auto-status{font-size:9px;line-height:1.6}.result-info{font-size:10px}.filters label{font-size:9px}body{background-size:auto,48px 48px,48px 48px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.job-card:hover{transform:none}}
