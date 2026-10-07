@@ -87,7 +87,7 @@ def match_message(subject, sender, body, jobs):
  return Match(status,candidates=tuple(j['id'] for j in candidates[:5]),reason='Several jobs or incomplete role evidence; choose manually' if candidates else 'Application not in the tracker; select a job or record it from this email')
 
 def updates():
- with store.connect() as c:return [{'id':r['id'],**json.loads(r['payload']),'resolved':r['resolved']} for r in c.execute("SELECT * FROM email_updates WHERE resolved!='ignored' ORDER BY created DESC LIMIT 100")]
+ with store.connect() as c:return [{'id':r['id'],**json.loads(r['payload']),'resolved':r['resolved']} for r in c.execute("SELECT * FROM email_updates WHERE resolved='' ORDER BY created DESC")]
 
 def advance_update(update_id, job, status):
  order={'New':0,'Saved':0,'Applied':1,'Assessment':2,'Interview':3,'Offer':4,'Rejected':5,'Withdrawn':5}
@@ -114,8 +114,7 @@ def apply_update(update_id, job_id, status):
  payload=json.loads(row[0]);job=next((j for j in store.jobs() if j['id']==job_id),None)
  if not job:raise ValueError('Select a tracked job')
  if row['resolved']=='matched:'+job_id and job['status']==status:return
- notes=job.get('notes','')+'\nEmail update: '+payload.get('subject','')
- store.update_job(job_id,{'status':status,'notes':notes.strip()})
+ store.update_job(job_id,{'status':status})
  with store.connect() as c:c.execute('UPDATE email_updates SET resolved=? WHERE id=?',('matched:'+job_id,update_id))
  alerts.enqueue('email:'+update_id,'JobTrackr application update',f"{job['company']} — {job['title']}\nStatus: {status}\nUpdated from an application email. Sheet sync follows automatically.",alerts.base()+'/#applications')
 

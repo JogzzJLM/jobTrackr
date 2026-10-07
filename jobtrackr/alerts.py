@@ -23,7 +23,7 @@ def new_listing(job):
 def flush():
  if os.getenv('NOTIFICATIONS_DISABLED')=='1':return
  with LOCK:
-  with store.connect() as c: pending=c.execute('SELECT * FROM outbox WHERE delivered IS NULL AND next_retry<=? ORDER BY rowid LIMIT 10',(time.time(),)).fetchall()
+  with store.connect() as c: pending=c.execute("SELECT * FROM outbox WHERE delivered IS NULL AND id NOT LIKE 'reminder:%' AND next_retry<=? ORDER BY rowid LIMIT 10",(time.time(),)).fetchall()
   for item in pending:
    payload=json.loads(item['payload'])
    try:
@@ -43,13 +43,11 @@ def flush():
     store.set_setting('notification_health',{'ok':False,'error':'Publish failed; queued for retry','topic':topic(),'last_attempt':store.now()})
 
 def scheduled():
- # Reminders use dates selected by the user; alert once per job/day.
+ # Closing-date alerts use verified listings, never old personal reminders.
  from zoneinfo import ZoneInfo
  local=datetime.now(ZoneInfo('Europe/London'));today=local.date().isoformat()
  items=store.jobs()
  for job in items:
-  if job.get('reminder') and job['reminder']<=today and job['status'] not in ('Dismissed','Rejected','Withdrawn'):
-   enqueue('reminder:'+job['id']+':'+job['reminder'],'JobTrackr follow-up reminder',f"{job['company']} — {job['title']}\nStatus: {job['status']}\nYour follow-up is due.\n{base()}/#applications")
   deadline=job.get('deadline','')[:10]
   try:days=(date.fromisoformat(deadline)-local.date()).days
   except ValueError:continue

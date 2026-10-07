@@ -25,8 +25,8 @@ class Handler(BaseHTTPRequestHandler):
   if path in ('/assets/style.css','/assets/app.js'):
    return self.reply((ROOT/path.split('/')[-1]).read_bytes(),mime='text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8')
   if path=='/api/state':
-   data={'jobs':store.jobs(),'scan':store.setting('scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'scan_interval':discovery.SCAN_INTERVAL,'sheet_url':sheets.edit_url(),'flow_version':hashlib.sha256(json.dumps(store.setting('sheet_rows',sheets.snapshot()),sort_keys=True).encode()).hexdigest()[:12],'sheets':store.setting('sheet_health',{})}
-   with store.connect() as c:data['pending_notifications']=c.execute('SELECT COUNT(*) FROM outbox WHERE delivered IS NULL').fetchone()[0]
+   data={'jobs':[{k:v for k,v in job.items() if k not in ('notes','reminder')} for job in store.jobs()],'scan':store.setting('scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'scan_interval':discovery.SCAN_INTERVAL,'sheet_url':sheets.edit_url(),'flow_version':hashlib.sha256(json.dumps(store.setting('sheet_rows',sheets.snapshot()),sort_keys=True).encode()).hexdigest()[:12],'sheets':store.setting('sheet_health',{})}
+   with store.connect() as c:data['pending_notifications']=c.execute("SELECT COUNT(*) FROM outbox WHERE delivered IS NULL AND id NOT LIKE 'reminder:%'").fetchone()[0]
    return self.reply(data)
   if path=='/sankey-embed':return self.reply(flow.html(),mime='text/html; charset=utf-8')
   if path=='/assets/plotly.js':
@@ -36,7 +36,7 @@ class Handler(BaseHTTPRequestHandler):
   if path.startswith('/api/history/'):
    return self.reply(store.history(path.rsplit('/',1)[-1]))
   if path=='/api/export':
-   output=io.StringIO();writer=csv.DictWriter(output,fieldnames=['company','title','location','link','status','notes','reminder','deadline','source','created','updated'],extrasaction='ignore');writer.writeheader();writer.writerows(store.jobs())
+   output=io.StringIO();writer=csv.DictWriter(output,fieldnames=['company','title','location','link','status','deadline','source','created','updated'],extrasaction='ignore');writer.writeheader();writer.writerows(store.jobs())
    return self.reply(output.getvalue(),mime='text/csv; charset=utf-8')
   self.reply({'error':'Not found'},404)
  def do_POST(self):
@@ -46,7 +46,7 @@ class Handler(BaseHTTPRequestHandler):
    size=int(self.headers.get('Content-Length','0'))
    if not 0<size<=100000:return self.reply({'error':'Invalid request size'},400)
    data=json.loads(self.rfile.read(size));path=urlparse(self.path).path
-   if path=='/api/job':store.update_job(str(data.get('id','')),data)
+   if path=='/api/job':store.update_job(str(data.get('id','')),{'status':data['status']})
    elif path=='/api/email/resolve':
     if data.get('ignore'):
      with store.connect() as c:c.execute('UPDATE email_updates SET resolved=? WHERE id=?',('ignored',str(data.get('id',''))))

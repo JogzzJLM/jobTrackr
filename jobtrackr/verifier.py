@@ -88,6 +88,19 @@ def _workday(url):
                    published_at=info.get('startDate', ''), final_url=url)
 
 
+def title_matches(expected, actual):
+    if not expected: return True
+    def tokens(value):
+        value = re.sub(r'\baccount(?:ant|ants|ing|ancy)\b', 'account', plain(value).lower())
+        value = re.sub(r'\b(?:program|programmes|programs)\b', 'programme', value)
+        return set(re.findall(r'[a-z]+', value)) - {'the', 'and', 'for', 'of', 'in', 'uk', 'graduate', 'graduates', 'programme', 'trainee', 'training', 'role'}
+    wanted, found = tokens(expected), tokens(actual)
+    # A finance job is still the wrong job if a redirect changes Audit to Tax.
+    special = {'audit', 'tax', 'payroll', 'treasury', 'account', 'finance'}
+    if (wanted & special) - found: return False
+    return bool(wanted) and len(wanted & found) / len(wanted) >= 0.6
+
+
 def _check(url, expected_title=''):
     parsed = urlparse(str(url))
     if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
@@ -96,7 +109,8 @@ def _check(url, expected_title=''):
         return _result('unknown', 'Employer/search portal rather than a specific job')
     try:
         wd = _workday(url)
-        if wd: return wd
+        if wd:
+            return wd if title_matches(expected_title, wd.get('title', '')) else _result('unknown', 'Employer detail title does not match the requested job')
         r = requests.get(url, headers=HEADERS, timeout=10, allow_redirects=True)
         if r.status_code in (404, 410): return _result('closed', f'HTTP {r.status_code}')
         if not 200 <= r.status_code < 300: return _result('unknown', f'HTTP {r.status_code}; cannot verify')
@@ -115,6 +129,8 @@ def _check(url, expected_title=''):
             closing = deadline_date(fields.get('closing_date'))
             if closing and closing < date.today(): return _result('closed', 'Application deadline passed', **fields)
             if fields['title'] and fields['description']:
+                if not title_matches(expected_title, fields['title']):
+                    return _result('unknown', 'JobPosting title does not match the requested job', final_url=r.url)
                 return _result('verified', 'Specific JobPosting with job description', final_url=r.url, **fields)
         headings = ' '.join(h.get_text(' ', strip=True) for h in soup.find_all(['h1', 'h2'])).lower()
         title_tokens = [w for w in re.findall(r'[a-z]+', expected_title.lower()) if len(w) > 3 and w not in {'summer', 'programme', 'program', 'internship'}]
@@ -138,12 +154,13 @@ def _check(url, expected_title=''):
 def verify_listing(url, expected_title='', force=False):
     with _LOCK:
         cached = load_json_safe(CACHE_FILE, {}).get(url)
-    if cached and not force:
+    if cached and not force and cached.get('expected_title') == expected_title:
         age = time.time() - cached.get('saved_at', 0)
         ttl = 30 * 60 if cached.get('state') == 'verified' else 5 * 60
         if age < ttl: return dict(cached)
     result = _check(url, expected_title)
     result['saved_at'] = time.time()
+    result['expected_title'] = expected_title
     with _LOCK:
         checks = load_json_safe(CACHE_FILE, {})
         checks[url] = result

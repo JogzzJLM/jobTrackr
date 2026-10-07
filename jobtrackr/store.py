@@ -12,7 +12,7 @@ DB = DATA_DIR / 'jobtrackr.sqlite3'
 LOCK = threading.RLock()
 DEFAULT_PROFILE = {'degree': 'Accounting and Finance Bachelors', 'university': '',
  'classification': '', 'graduation_year': None, 'experience_years': None, 'uk_citizen': None,
- 'relocate': True, 'acca_status': 'Not confirmed', 'a_level_points': None,
+ 'relocate': True, 'acca_status': 'Not confirmed', 'a_level_points': None, 'a_level_grades_confirmed': False,
  'gcse_maths': '', 'gcse_english': '', 'name': 'Finance graduate', 'award': '', 'work_experience': ''}
 
 STATUSES = ('New', 'Saved', 'Applied', 'Assessment', 'Interview', 'Offer', 'Rejected', 'Withdrawn', 'Dismissed')
@@ -80,7 +80,7 @@ def upsert(job):
   c.execute('INSERT INTO history(job_id,event,timestamp) VALUES(?,?,?)',(job['id'],'Discovered and verified',timestamp))
  return True
 
-def update_job(job_id, data):
+def update_job(job_id, data, expected_status=None):
  with connect() as c:
   row=c.execute('SELECT * FROM jobs WHERE id=?',(job_id,)).fetchone()
   if not row: raise ValueError('Job not found')
@@ -90,9 +90,13 @@ def update_job(job_id, data):
   if reminder:
    from datetime import date
    date.fromisoformat(reminder)
-  c.execute('UPDATE jobs SET status=?,notes=?,reminder=?,updated=? WHERE id=?',(status,notes,reminder,now(),job_id))
-  event=f"Status: {status}" if status != row['status'] else 'Notes or reminder updated'
-  c.execute('INSERT INTO history(job_id,event,timestamp) VALUES(?,?,?)',(job_id,event,now()))
+  sql='UPDATE jobs SET status=?,notes=?,reminder=?,updated=? WHERE id=?'
+  parameters=(status,notes,reminder,now(),job_id)
+  if expected_status is not None:
+   sql+=' AND status=?';parameters+=(expected_status,)
+  if not c.execute(sql,parameters).rowcount:return False
+  if status != row['status']:
+   c.execute('INSERT INTO history(job_id,event,timestamp) VALUES(?,?,?)',(job_id,f'Status: {status}',now()))
 
 def history(job_id):
  with connect() as c:return [dict(r) for r in c.execute('SELECT event,timestamp FROM history WHERE job_id=? ORDER BY id DESC',(job_id,))]

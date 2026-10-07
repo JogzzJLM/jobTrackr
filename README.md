@@ -9,7 +9,7 @@ Candidate education, graduation year, grades, citizenship, awards and work histo
 
 ## Features
 
-Discover, dismiss/restore, application stages (Applied, Assessment, Interview, Offer, Rejected, Withdrawn), notes, activity history, dated follow-ups, custom job links, and CSV export. Persistent SQLite database in `/data/jobtrackr.sqlite3`; no Sheets required. Original profiles/listing files are retained. Legacy listings are only candidates for new verification, never blindly treated as eligible.
+Discover, dismiss/restore, application stages (Applied, Assessment, Interview, Offer, Rejected, Withdrawn), activity history, custom job links, and CSV export. Persistent SQLite database in `/data/jobtrackr.sqlite3`; no Sheets required. Original profiles/listing files are retained. Legacy listings are only candidates for new verification, never blindly treated as eligible.
 
 Desktop and mobile automatically adapt; no compact-mode switch. Twelve jobs per page, search/category/study-support filters, deadline or fit sorting, full expandable descriptions.
 
@@ -27,7 +27,7 @@ ntfy topic: `applicationtrackr_alerts_har`. First crawl sends one summary to avo
 
 Tests: `python -m unittest discover -s tests -p test_finance_tracker.py -v`.
 
-Applications are opened on the employer website and submitted by the applicant. This version does not auto-submit. Gmail email tracking is opt-in and requires the brother's own account setup; an optional authenticated Google Sheet mirror is available (see setup/README.md).
+Applications are opened on the employer website and submitted by the applicant. This version does not auto-submit. Gmail email tracking is opt-in and requires the brother's own account setup; an optional authenticated two-way Google Sheet sync is available (see setup/README.md).
 
 ## Research checked 6 October 2026
 
@@ -44,4 +44,4 @@ The listener checks the last 14 days (up to 100 latest messages) every five minu
 
 ## Simplified discovery-first interface
 
-Jobs, applications with a stage-flow diagram, email updates and service status. No shortlist, profile editor or manual scan control. Discovery checks automatically every five minutes by default, matching ApplicationTrackr. Private first-time settings and optional Google Sheet mirror are documented in [setup/README.md](setup/README.md).
+Jobs, applications with a stage-flow diagram, email updates and service status. No shortlist, profile editor or manual scan control. Discovery checks automatically every five minutes by default, matching ApplicationTrackr. Private first-time settings and optional Google Sheet sync are documented in [setup/README.md](setup/README.md).

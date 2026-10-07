@@ -1,4 +1,4 @@
-"""Optional private Google Sheet mirror. SQLite remains the source of truth."""
+"""Private two-way sync of recorded applications and their Sheet stages."""
 import hashlib
 import json
 import os
@@ -35,7 +35,7 @@ def canonical_stage(value):
  if text in ('applied','application submitted','application received'):return 'Applied'
  return ''
 
-def import_applications(rows):
+def import_applications(rows, sent_statuses=None):
  from .normalization import normalize_company, normalize_role
  jobs=store.jobs();saved={};flow=[]
  for row in rows:
@@ -57,7 +57,8 @@ def import_applications(rows):
     payload=json.loads(record['payload']);payload.update({'company':company,'title':title})
     c.execute('UPDATE jobs SET payload=? WHERE id=?',(json.dumps(payload),job_id))
   stage=next((canonical_stage(s) for s in reversed(stages) if canonical_stage(s)), 'Applied')
-  if current!=stage:store.update_job(job_id,{'status':stage})
+  changed_during_sync=sent_statuses is not None and job_id in sent_statuses and current!=sent_statuses[job_id]
+  if current!=stage and not changed_during_sync:store.update_job(job_id,{'status':stage},expected_status=sent_statuses.get(job_id) if sent_statuses is not None else None)
   saved[job_id]=stages;flow.append({**row,'id':job_id,'stages':stages})
  store.set_setting('sheet_stages',saved);store.set_setting('sheet_rows',flow)
 
@@ -69,8 +70,9 @@ def sync():
  try:
   response=requests.post(url,json={'token':token,'layout':'applications-v3','jobs':rows,'baseline':store.setting('sheet_sent_rows',rows)},timeout=30);response.raise_for_status();receipt=response.json()
   if receipt.get('ok') is not True or receipt.get('count')!=len(rows) or receipt.get('layout')!='applications-v3' or not isinstance(receipt.get('applications'),list):raise ValueError('Sheet did not confirm all records')
-  import_applications(receipt['applications'])
-  store.set_setting('sheet_sent_rows',snapshot())
+  import_applications(receipt['applications'], {row['id']:row['status'] for row in rows})
+  # The baseline records what the Sheet acknowledged, not a newer local update.
+  store.set_setting('sheet_sent_rows',store.setting('sheet_rows',[]))
   store.set_setting('sheet_fingerprint',fingerprint);store.set_setting('sheet_health',{'ok':True,'configured':True,'last_synced':store.now(),'sheet_url':receipt.get('sheet_url',edit_url()),'message':'Applications Sheet up to date. Only recorded applications are included.'});return True
  except (requests.RequestException,ValueError):
   store.set_setting('sheet_health',{'ok':False,'configured':True,'message':'Sheet sync delayed; local records are safe. Retrying automatically.'});return False
