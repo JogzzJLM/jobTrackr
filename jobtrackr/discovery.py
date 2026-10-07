@@ -245,7 +245,7 @@ def scan():
    for future in concurrent.futures.as_completed(futures):
     name=futures[future]
     try:
-     rows=future.result();rows=[{**j,'feed_name':name} for j in rows];candidates.extend(rows);health[name]={'ok':True,'candidates':len(rows),'relevant_candidates':sum(evaluate(j)['state']!='filtered' for j in rows),'verified':0,'unconfirmed':0,'closed':0,'filtered':sum(evaluate(j)['state']=='filtered' for j in rows),'checked_at':store.now()}
+     rows=list({normalize_url(j['link']):j for j in future.result() if j.get('link')}.values());rows=[{**j,'feed_name':name} for j in rows];candidates.extend(rows);health[name]={'ok':True,'candidates':len(rows),'relevant_candidates':sum(evaluate(j)['state']!='filtered' for j in rows),'verified':0,'unconfirmed':0,'closed':0,'filtered':sum(evaluate(j)['state']=='filtered' for j in rows),'checked_at':store.now()}
     except Exception as exc:health[name]={'ok':False,'error':f'Feed unavailable ({type(exc).__name__}); will retry','checked_at':store.now()}
   # Imported legacy jobs are candidates only: never shown as verified blindly.
   if not store.setting('legacy_reviewed',False):

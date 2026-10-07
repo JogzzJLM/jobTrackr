@@ -198,6 +198,9 @@ def poll():
     if decision.certain:
      job=next(j for j in store.jobs() if j['id']==decision.job_id);advance_update(mid,job,decision.status)
    store.set_setting(cursor_key,numeric_uid);processed+=1
+   if processed%20==0:
+    remaining=max(0,len(uids)-processed)
+    store.set_setting('mail_health',{'connected':True,'last_checked':store.now(),'folder':folder.strip('"'),'remaining':remaining,'message':f'Processing mailbox without marking messages read. {remaining} messages remaining.'})
   reconcile_updates();remaining=max(0,len(uids)-processed)
   store.set_setting('mail_health',{'connected':True,'last_checked':store.now(),'folder':folder.strip('"'),'remaining':remaining,'message':f'Mailbox checked without marking messages read. {remaining} messages awaiting the next batch.' if remaining else 'Mailbox checked without marking messages read. Uncertain matches await review.'})
  except (imaplib.IMAP4.error,OSError,ValueError):store.set_setting('mail_health',{'connected':False,'message':'Email check interrupted; saved checkpoints will retry automatically.','last_checked':store.now()})
