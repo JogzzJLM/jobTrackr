@@ -201,7 +201,9 @@ class ApplicationsOnlySheetTests(unittest.TestCase):
   from jobtrackr import sheets
   job={'id':'a','company':'RSM','title':'Audit Graduate','status':'Rejected'}
   history=[{'event':'Status: Rejected'},{'event':'Notes or reminder updated'},{'event':'Status: Interview'},{'event':'Status: Applied'}]
-  with patch('jobtrackr.store.jobs',return_value=[job]),patch('jobtrackr.store.history',return_value=history):
+  with store.connect() as connection:
+   for event in reversed(history):connection.execute('INSERT INTO history(job_id,event,timestamp) VALUES(?,?,?)',('a',event['event'],store.now()))
+  with patch('jobtrackr.store.jobs',return_value=[job]):
    row=sheets.snapshot()[0];self.assertEqual(row['stages'],['Applied','Interview','Rejected']);self.assertNotIn('notes',row)
  def test_old_sheet_endpoint_cannot_ack_new_layout(self):
   from jobtrackr import sheets
