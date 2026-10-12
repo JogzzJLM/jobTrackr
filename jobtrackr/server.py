@@ -8,6 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from . import store, discovery, alerts, mail, sheets, flow
 from .eligibility import evaluate, displayable
+from .verifier import deadline_date
+from datetime import date
 from .verifier import verify_listing
 from .normalization import normalize_url, canonical_url
 import hashlib
@@ -25,20 +27,25 @@ class Handler(BaseHTTPRequestHandler):
   if path in ('/assets/style.css','/assets/app.js','/assets/groups.js','/assets/themes.js'):
    return self.reply((ROOT/path.split('/')[-1]).read_bytes(),mime='text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8')
   if path=='/api/state':
-   data={'jobs':[{k:v for k,v in job.items() if k not in ('notes','reminder')} for job in store.jobs()],'scan':store.setting('scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'colour_profile':store.setting('colour_profile','ocean'),'scan_interval':discovery.SCAN_INTERVAL,'sheet_url':sheets.edit_url(),'flow_version':hashlib.sha256(json.dumps((store.setting('sheet_rows') or sheets.snapshot()),sort_keys=True).encode()).hexdigest()[:12],'sheets':store.setting('sheet_health',{})}
+   data={'jobs':[{k:v for k,v in job.items() if k not in ('notes','reminder','description')} for job in store.jobs() if job['status'] not in ('New','Saved') or not deadline_date(job.get('deadline')) or deadline_date(job['deadline'])>=date.today()],'scan':store.setting('scan',{}),'last_successful_scan':store.setting('last_successful_scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'colour_profile':store.setting('colour_profile','ocean'),'scan_interval':discovery.SCAN_INTERVAL,'health':__import__('jobtrackr.health',fromlist=['health']).health(),'sheet_url':sheets.edit_url(),'flow_version':hashlib.sha256(json.dumps((store.setting('sheet_rows') or sheets.snapshot()),sort_keys=True).encode()).hexdigest()[:12],'sheets':store.setting('sheet_health',{})}
    with store.connect() as c:data['pending_notifications']=c.execute("SELECT COUNT(*) FROM outbox WHERE delivered IS NULL AND id NOT LIKE 'reminder:%'").fetchone()[0]
    return self.reply(data)
   if path=='/sankey-embed':return self.reply(flow.html(),mime='text/html; charset=utf-8')
   if path=='/assets/plotly.js':
    from plotly.offline import get_plotlyjs
    return self.reply(get_plotlyjs(),mime='text/javascript; charset=utf-8')
-  if path=='/api/health':return self.reply({'ok':True,'version':'finance-graduate-v1','scan':store.setting('scan',{})})
+  if path=='/api/health':
+   from .health import health
+   return self.reply({'version':'finance-graduate-v2',**health()})
+  if path.startswith('/api/details/'):
+   job=next((j for j in store.jobs() if j['id']==path.rsplit('/',1)[-1]),None)
+   return self.reply({'description':job.get('description',''),'updated':job.get('updated')} if job else {'error':'Job not found'},200 if job else 404)
   if path.startswith('/api/events/'):
    return self.reply(store.application_events(path.rsplit('/',1)[-1]))
   if path.startswith('/api/history/'):
    return self.reply(store.history(path.rsplit('/',1)[-1]))
   if path=='/api/export':
-   output=io.StringIO();writer=csv.DictWriter(output,fieldnames=['company','title','location','link','status','deadline','source','created','updated'],extrasaction='ignore');writer.writeheader();writer.writerows(store.jobs())
+   output=io.StringIO();writer=csv.DictWriter(output,fieldnames=['company','title','location','link','status','deadline','source','created','updated'],extrasaction='ignore');writer.writeheader();scope=__import__('urllib.parse',fromlist=['parse_qs']).parse_qs(urlparse(self.path).query).get('scope',['all'])[0];writer.writerows(j for j in store.jobs() if scope!='applications' or j['status'] in mail.APPLICATION_STAGES)
    return self.reply(output.getvalue(),mime='text/csv; charset=utf-8')
   self.reply({'error':'Not found'},404)
  def do_POST(self):

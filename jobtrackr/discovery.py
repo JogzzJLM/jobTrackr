@@ -236,7 +236,11 @@ def enrich(job,force=False):
 
 def scan():
  if not SCAN_LOCK.acquire(blocking=False):return False
- started=time.time();health={};new=0;checked=0
+ known_ids={j['id'] for j in store.jobs()};started=time.time();health={};new=0;checked=0;record_errors=[];new_jobs=[]
+ def save_listing(job):
+  try:return store.upsert(job)
+  except Exception as exc:
+   record_errors.append({'id':job.get('id',''),'error':type(exc).__name__});return False
  try:
   store.set_setting('scan',{'running':True,'started':store.now()})
   candidates=[]
@@ -247,6 +251,7 @@ def scan():
     try:
      rows=list({normalize_url(j['link']):j for j in future.result() if j.get('link')}.values());rows=[{**j,'feed_name':name} for j in rows];candidates.extend(rows);health[name]={'ok':True,'candidates':len(rows),'relevant_candidates':sum(evaluate(j)['state']!='filtered' for j in rows),'verified':0,'unconfirmed':0,'closed':0,'filtered':sum(evaluate(j)['state']=='filtered' for j in rows),'checked_at':store.now()}
     except Exception as exc:health[name]={'ok':False,'error':f'Feed unavailable ({type(exc).__name__}); will retry','checked_at':store.now()}
+  store.set_setting('sources',health)
   # Imported legacy jobs are candidates only: never shown as verified blindly.
   if not store.setting('legacy_reviewed',False):
    for root in (store.DATA_DIR, __import__('pathlib').Path(__file__).resolve().parent.parent):
@@ -256,7 +261,7 @@ def scan():
   for existing in store.jobs():
    decision=evaluate(existing)
    if not displayable(decision):
-    existing['verification']={'state':decision['state'],'reason':'; '.join(decision['requirements']),'checked_at':store.now()};store.upsert(existing)
+    existing['verification']={'state':decision['state'],'reason':'; '.join(decision['requirements']),'checked_at':store.now()};save_listing(existing)
   candidates.extend({k:v for k,v in j.items() if k not in ('status','notes','reminder','created','updated')} for j in store.jobs() if j.get('link'))
   unique={}
   for j in candidates:
@@ -283,21 +288,24 @@ def scan():
      # Existing application history remains, but the listing ceases to be actionable.
      existing=next((x for x in store.jobs() if x['link']==job['link']),None)
      if existing:
-      job['id']=existing['id'];job['verification']={'state':verification['state'] if verification['state']!='verified' else decision['state'],'reason':reason,'checked_at':store.now()};store.upsert(job)
+      job['id']=existing['id'];job['verification']={'state':verification['state'] if verification['state']!='verified' else decision['state'],'reason':reason,'checked_at':store.now()};save_listing(job)
      continue
-    job.update(decision);job['id']=hashlib.sha256(job['link'].encode()).hexdigest()[:24]
-    is_new=store.upsert(job);store.clear_review(job['link'])
+    job.update(decision);job['id']=original['id'] if original.get('id') in known_ids else hashlib.sha256(job['link'].encode()).hexdigest()[:24]
+    is_new=save_listing(job);store.clear_review(job['link'])
     if is_new:
      new+=1
-     if store.setting('alerts_initialized',False):alerts.new_listing(job)
+     if store.setting('alerts_initialized',False):new_jobs.append(job)
   store.set_setting('sources',health)
-  store.set_setting('scan',{'running':False,'finished':store.now(),'seconds':round(time.time()-started),'new':new,'checked':checked})
+  result={'running':False,'finished':store.now(),'seconds':round(time.time()-started),'new':new,'checked':checked,'errors':record_errors[:100]}
+  store.set_setting('scan',result)
+  if not record_errors:store.set_setting('last_successful_scan',result)
+  if new_jobs:alerts.new_listings(new_jobs)
   if not store.setting('alerts_initialized',False):
    if new:alerts.enqueue('initial-discovery','JobTrackr is ready',f'{new} verified finance graduate roles found. Open JobTrackr to explore them. Future new roles get individual alerts.')
    store.set_setting('alerts_initialized',True)
   alerts.flush();return True
  except Exception as exc:
-  store.set_setting('scan',{'running':False,'error':type(exc).__name__,'finished':store.now()});return False
+  store.set_setting('sources',health);store.set_setting('scan',{'running':False,'error':type(exc).__name__,'finished':store.now(),'new':new,'checked':checked,'errors':record_errors[:100]});return False
  finally:SCAN_LOCK.release()
 
 def loop(stop):

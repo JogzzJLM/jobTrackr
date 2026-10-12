@@ -42,12 +42,13 @@
   for(const f of result){if(f.members.length>1)f.title=roleTitle(f);f.members.sort((a,b)=>String(a.location).localeCompare(b.location));}
   return result;
  }
+ const expired=j=>{const d=String(j.deadline||'').slice(0,10);return /^\d{4}-\d{2}-\d{2}$/.test(d)&&d<new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/London',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());};
  const applied=j=>['Applied','Assessment','Interview','Offer','Rejected','Withdrawn'].includes(j.status);
  function available(jobs,includeApplied=false){
   const tracked=jobs.filter(applied),families=new Set(tracked.map(programme));
   // Email/Sheet-created applications may lack source/location metadata.
   const recorded=new Set(tracked.filter(j=>!j.location||j.route_type!=='Direct employer').map(j=>words(j.company)+'|'+words(roleTitle(j))));
-  return jobs.filter(j=>['New','Saved'].includes(j.status)&&j.verification?.state==='verified'&&(includeApplied||(!families.has(programme(j))&&!recorded.has(words(j.company)+'|'+words(roleTitle(j))))));
+  return jobs.filter(j=>['New','Saved'].includes(j.status)&&!expired(j)&&j.verification?.state==='verified'&&(includeApplied||(!families.has(programme(j))&&!recorded.has(words(j.company)+'|'+words(roleTitle(j))))));
  }
  const api={programme,group,roleTitle,available};if(typeof module!=='undefined')module.exports=api;else root.JobGroups=api;
 })(typeof window==='undefined'?{}:window);

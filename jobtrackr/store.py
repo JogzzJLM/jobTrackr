@@ -89,9 +89,10 @@ def application_from_email(email_id, company, title, link=''):
  return job_id
 
 def upsert(job):
- timestamp=now()
+ job=dict(job);timestamp=now()
  with LOCK,connect() as c:
-  existing=c.execute('SELECT id FROM jobs WHERE url=?',(job['link'],)).fetchone()
+  existing=c.execute('SELECT id FROM jobs WHERE id=?',(job['id'],)).fetchone()
+  if not existing:existing=c.execute('SELECT id FROM jobs WHERE url=?',(job['link'],)).fetchone()
   if not existing:
    from .normalization import finance_same_listing
    existing=next((r for r in c.execute('SELECT id,payload FROM jobs') if finance_same_listing(job,json.loads(r['payload']))),None)
@@ -100,7 +101,10 @@ def upsert(job):
    links=list(dict.fromkeys(previous.get('alternate_links',[])+job.get('alternate_links',[])+[previous.get('link',''),job.get('link','')]))
    if previous.get('route_type')=='Direct employer' and job.get('route_type')!='Direct employer':job={**previous,'alternate_links':links}
    else:job['alternate_links']=links
-   job['id']=existing['id']; c.execute('UPDATE jobs SET payload=?,updated=? WHERE id=?',(json.dumps(job),timestamp,job['id'])); return False
+   job['id']=existing['id']
+   owner=c.execute('SELECT id FROM jobs WHERE url=?',(job['link'],)).fetchone()
+   if not owner or owner['id']==job['id']:c.execute('UPDATE jobs SET url=? WHERE id=?',(job['link'],job['id']))
+   c.execute('UPDATE jobs SET payload=?,updated=? WHERE id=?',(json.dumps(job),timestamp,job['id'])); return False
   c.execute('INSERT INTO jobs(id,url,payload,created,updated) VALUES(?,?,?,?,?)',(job['id'],job['link'],json.dumps(job),timestamp,timestamp))
   c.execute('INSERT INTO history(job_id,event,timestamp) VALUES(?,?,?)',(job['id'],'Discovered and verified',timestamp))
  return True
@@ -122,6 +126,10 @@ def update_job(job_id, data, expected_status=None, stage_label=None):
   if not c.execute(sql,parameters).rowcount:return False
   if status != row['status'] or stage_label:
    c.execute('INSERT INTO history(job_id,event,timestamp) VALUES(?,?,?)',(job_id,f'Status: {stage_label or status}',now()))
+
+ if status != row['status'] or stage_label:
+  from .sheets import request_sync
+  request_sync()
 
 def history(job_id):
  with connect() as c:return [dict(r) for r in c.execute('SELECT id,event,timestamp FROM history WHERE job_id=? ORDER BY id DESC',(job_id,))]

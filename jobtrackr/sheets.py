@@ -3,6 +3,9 @@ import hashlib
 import json
 import os
 import requests
+import threading
+_SYNC_LOCK=threading.Lock()
+_SYNC_WAKE=threading.Event()
 from . import store
 APPLICATION_STAGES=('Applied','Assessment','Interview','Offer','Rejected','Withdrawn')
 def edit_url():
@@ -42,7 +45,7 @@ def canonical_stage(value):
 
 def import_applications(rows, sent_statuses=None, acknowledged_cursors=None):
  from .normalization import normalize_company, normalize_role
- jobs=store.jobs();saved={};flow=[]
+ jobs=store.jobs();saved={};flow=[];previous=store.setting('sheet_stages',{})
  for row in rows:
   if not isinstance(row,dict):continue
   company=str(row.get('company','')).strip();title=str(row.get('title','')).strip()
@@ -65,10 +68,21 @@ def import_applications(rows, sent_statuses=None, acknowledged_cursors=None):
   changed_during_sync=sent_statuses is not None and job_id in sent_statuses and current!=sent_statuses[job_id]
   if current!=stage and not changed_during_sync:store.update_job(job_id,{'status':stage},expected_status=sent_statuses.get(job_id) if sent_statuses is not None else None)
   saved[job_id]=stages;flow.append({**row,'id':job_id,'stages':stages})
+ removed=set(previous)-set(saved);cleared=set();current_cursors=store.history_cursors()
+ for job_id in removed:
+  job=next((j for j in jobs if j['id']==job_id),None)
+  changed=job and sent_statuses is not None and job_id in sent_statuses and job['status']!=sent_statuses[job_id]
+  changed=changed or (acknowledged_cursors is not None and current_cursors.get(job_id,0)>acknowledged_cursors.get(job_id,0))
+  if changed:
+   saved[job_id]=previous[job_id]
+  elif job:
+   store.update_job(job_id,{'status':'New'});cleared.add(job_id)
  store.set_setting('sheet_stages',saved);store.set_setting('sheet_rows',flow)
- store.set_setting('sheet_history_cursors',store.history_cursors() if acknowledged_cursors is None else acknowledged_cursors)
+ cursors=store.history_cursors() if acknowledged_cursors is None else dict(acknowledged_cursors)
+ for jid in cleared:cursors[jid]=store.history_cursors().get(jid,0)
+ store.set_setting('sheet_history_cursors',cursors)
 
-def sync():
+def _sync():
  url=os.getenv('GOOGLE_SHEET_WEBHOOK_URL','');token=os.getenv('GOOGLE_SHEET_SYNC_TOKEN','')
  if not url or not token:
   store.set_setting('sheet_health',{'ok':False,'configured':False,'message':'Google Sheets not connected.'});return False
@@ -83,6 +97,19 @@ def sync():
  except (requests.RequestException,ValueError):
   store.set_setting('sheet_health',{'ok':False,'configured':True,'message':'Sheet sync delayed; local records are safe. Retrying automatically.'});return False
 
+def sync():
+ if not _SYNC_LOCK.acquire(blocking=False):
+  _SYNC_WAKE.set();return False
+ try:return _sync()
+ finally:_SYNC_LOCK.release()
+
+def request_sync():
+ if os.getenv('GOOGLE_SHEET_WEBHOOK_URL') and os.getenv('GOOGLE_SHEET_SYNC_TOKEN'):
+  store.set_setting('sheet_health',{'ok':False,'configured':True,'pending':True,'message':'Syncing your latest application changes to Google Sheets…'})
+  _SYNC_WAKE.set()
+
 def loop(stop):
  while not stop.is_set():
-  sync();stop.wait(60)
+  _SYNC_WAKE.clear();sync()
+  for _ in range(60):
+   if stop.wait(1) or _SYNC_WAKE.is_set():break

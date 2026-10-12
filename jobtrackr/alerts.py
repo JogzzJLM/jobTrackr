@@ -17,8 +17,23 @@ def enqueue(event, title, message, url=None):
  with store.connect() as c:c.execute('INSERT OR IGNORE INTO outbox(id,payload) VALUES(?,?)',(event,json.dumps(payload)))
 
 def new_listing(job):
- enqueue('listing:'+job['id'],f"New finance role: {job['company']} - {job['title']}",
- f"{job['title']}\n{job['company']} | {job['location']}\nSalary: {job.get('salary') or 'Not published'}\nDeadline: {job.get('deadline') or 'Not published'}\nStudy support: {'Mentioned' if job.get('study_support') else 'Not confirmed'}\n"+'; '.join(job.get('reasons',[]))+'\nRoute: '+job.get('route_type','Public job advert')+f"\nPublic vacancy page checked and saved to JobTrackr.\n{job['link']}",job['link'])
+ new_listings([job])
+
+def new_listings(jobs):
+ from .programmes import key
+ groups={}
+ with LOCK,store.connect() as c:
+  for job in jobs:
+   if c.execute('SELECT 1 FROM outbox WHERE id=?',('listing:'+job['id'],)).fetchone():continue
+   groups.setdefault(key(job),[]).append(job)
+  for family,items in groups.items():
+   first=items[0];locations=sorted(set(j.get('location','') for j in items if j.get('location')))
+   title=f"New finance role: {first['company']} - {first['title']}" if len(items)==1 else f"New finance programme: {first['company']} — {len(locations)} locations"
+   message=f"{first['company']} — {first['title']}\nLocations: {', '.join(locations)}\nSalary: {first.get('salary') or 'Not published'}\nDeadline: {first.get('deadline') or 'Not published'}\nStudy support: {'Mentioned' if first.get('study_support') else 'Not confirmed'}\nRoute: {first.get('route_type','Public job advert')}\nOpen JobTrackr to choose a location and read the checks."
+   identity='programme:'+hashlib.sha256((family+'|'+ '|'.join(sorted(j['id'] for j in items))).encode()).hexdigest()[:32]
+   payload={'title':title,'message':message,'url':first['link'] if len(items)==1 else base()+'/#jobs'}
+   c.execute('INSERT OR IGNORE INTO outbox(id,payload) VALUES(?,?)',(identity,json.dumps(payload)))
+   for j in items:c.execute('INSERT OR IGNORE INTO outbox(id,payload,delivered) VALUES(?,?,?)',('listing:'+j['id'],json.dumps({'bundled_into':identity}),store.now()))
 
 def flush():
  if os.getenv('NOTIFICATIONS_DISABLED')=='1':return

@@ -46,17 +46,16 @@ class Match:
  candidates: tuple = ()
  reason: str = ''
 
+from .mail_outcomes import classify_email_stage, latest_message_text, REJECTION_WORDING_REVISION
+
 def classify(text):
- text=text.lower()
- if not re.search(r'\b(application|role|position|job|recruitment|interview|assessment|employment|applying)\b',text):return ''
- rules=[('Rejected',r'(?:not (?:be )?(?:progressing|proceeding|moving forward)|unsuccessful|regret to inform|not been successful|not to (?:progress|proceed)|will not be (?:progressing|proceeding))'),
- ('Offer',r'(?:pleased to offer you|offer of employment|employment offer|offer you (?:the|a) (?:role|position|job))'),
- ('Interview',r'(?:invite.{0,70}interview|interview.{0,40}(?:invitation|scheduled|booking|availability)|schedule.{0,40}interview|invited.{0,50}assessment cent(?:re|er))'),
- ('Assessment',r'(?:invite.{0,70}(?:assessment|online test|numerical reasoning)|(?:complete|take).{0,70}(?:assessment|online test|numerical reasoning)|assessment invitation)'),
- ('Applied',r'(?:thank(?: you|s) for (?:your application|applying)|application (?:has been |was |successfully )?received|received your application|application (?:has been |was )?submitted)')]
- return next((status for status,pattern in rules if re.search(pattern,text,re.S)), '')
+ stage=classify_email_stage(text)
+ if stage=='Online Assessment':return 'Assessment'
+ if stage and stage.startswith('Interview'):return 'Interview'
+ return stage if stage in APPLICATION_STAGES else ''
 
 def match_message(subject, sender, body, jobs):
+ body=latest_message_text(body)
  display_sender=parseaddr(sender)[0] if '@' in sender else sender
  text=f'{subject} {display_sender} {body}'.lower();status=classify(subject+' '+body)
  if not status:return Match(status,reason='No application-status evidence')
@@ -89,6 +88,14 @@ def updates():
  with store.connect() as c:return [{'id':r['id'],**json.loads(r['payload']),'resolved':r['resolved']} for r in c.execute("SELECT * FROM email_updates WHERE resolved='' ORDER BY created DESC")]
 
 def advance_update(update_id, job, status):
+ if job['status'] in ('Rejected','Withdrawn','Offer') and status!=job['status']:
+  with store.connect() as c:
+   row=c.execute('SELECT payload FROM email_updates WHERE id=?',(update_id,)).fetchone()
+   record=json.loads(row[0]);record.update(requires_review=True,reason='Email conflicts with a finished application; confirm the stage manually')
+   evidence=events.details(record,status);evidence.update(stage_change_held=True,reason=record['reason'])
+   c.execute('INSERT OR IGNORE INTO application_events VALUES(?,?,?,?,?)',(update_id,job['id'],json.dumps(evidence),events.occurred_at(record),store.now()))
+   c.execute('UPDATE email_updates SET payload=?,resolved=? WHERE id=?',(json.dumps(record),'',update_id))
+  return
  order={'New':0,'Saved':0,'Applied':1,'Assessment':2,'Interview':3,'Offer':4,'Rejected':5,'Withdrawn':5}
  can_advance=job['status'] not in ('Rejected','Withdrawn') and order.get(status,0)>=order.get(job['status'],0)
  apply_update(update_id,job['id'],status,change_stage=can_advance)
@@ -99,6 +106,7 @@ def reconcile_updates():
  with store.connect() as c:pending=c.execute("SELECT id,payload FROM email_updates WHERE resolved='' ORDER BY created").fetchall()
  for row in pending:
   record=json.loads(row['payload'])
+  if record.get('requires_review'):continue
   decision=match_message(record.get('subject',''),record.get('sender',''),record.get('snippet',''),jobs)
   if decision.certain:
    job=next(j for j in jobs if j['id']==decision.job_id)
@@ -117,6 +125,7 @@ def apply_update(update_id, job_id, status, change_stage=True):
   if old and old['job_id']!=job_id:raise ValueError('This message is already matched to another application')
   if old and row['resolved']=='matched:'+job_id:return
   if not old:c.execute('INSERT INTO application_events VALUES(?,?,?,?,?)',(update_id,job_id,json.dumps(evidence),timestamp,store.now()))
+  else:c.execute('UPDATE application_events SET payload=?,occurred_at=? WHERE id=?',(json.dumps(evidence),timestamp,update_id))
  label=evidence['label'];specific=label!=status
  if change_stage:
   last=next((h['event'].removeprefix('Status: ') for h in store.history(job_id) if h['event'].startswith('Status: ')), '')
@@ -139,7 +148,12 @@ def message_body(message):
   content=part.get_payload(decode=True) or b''
   try:text=content.decode(part.get_content_charset() or 'utf-8',errors='replace')
   except LookupError:text=content.decode('utf-8',errors='replace')
-  parts.append(plain(text) if part.get_content_type()=='text/html' else text)
+  if part.get_content_type()=='text/html':
+   from bs4 import BeautifulSoup
+   soup=BeautifulSoup(text,'html.parser')
+   for node in soup.select('blockquote,.gmail_quote,.yahoo_quoted,#divRplyFwdMsg'):node.decompose()
+   text=soup.get_text(' ',strip=True)
+  parts.append(text)
  return '\n'.join(parts)[:30000]
 
 def mailbox_folder(client):
@@ -168,13 +182,20 @@ def poll():
   account=hashlib.sha256((host+'|'+user).encode()).hexdigest()[:16]
   cursor_key='mail_cursor:'+hashlib.sha256((account+'|'+folder+'|'+str(validity)).encode()).hexdigest()[:24]
   cursor=store.setting(cursor_key,0)
-  if cursor:typ,data=client.uid('search',None,'UID',str(cursor+1)+':*')
+  recovery_key='mail_outcomes_revision:'+account
+  recovery=bool(cursor) and store.setting(recovery_key,0)<REJECTION_WORDING_REVISION
+  if not cursor:store.set_setting(recovery_key,REJECTION_WORDING_REVISION)
+  if recovery and store.setting(recovery_key+':partial_revision',0)!=REJECTION_WORDING_REVISION:
+   store.set_setting(recovery_key+':cursor',0);store.set_setting(recovery_key+':partial_revision',REJECTION_WORDING_REVISION)
+  if cursor and not recovery:typ,data=client.uid('search',None,'UID',str(cursor+1)+':*')
   else:
    days=max(14,min(365,int(os.getenv('JOBTRACKR_MAIL_LOOKBACK_DAYS','90'))))
    since=(datetime.now(timezone.utc)-timedelta(days=days)).strftime('%d-%b-%Y')
    typ,data=client.uid('search',None,'SINCE',since)
   if typ!='OK':raise ValueError('Mailbox search failed')
-  uids=sorted({int(uid) for uid in (data[0] or b'').split() if int(uid)>cursor})
+  uids=sorted({int(uid) for uid in (data[0] or b'').split() if recovery or int(uid)>cursor})
+  recovery_cursor=store.setting(recovery_key+':cursor',0) if recovery else 0
+  if recovery:uids=[u for u in uids if u>recovery_cursor]
   batch=max(1,min(500,int(os.getenv('JOBTRACKR_MAIL_BATCH_SIZE','200'))));processed=0
   for numeric_uid in uids[:batch]:
    uid=str(numeric_uid).encode();typ,raw=client.uid('fetch',uid,'(BODY.PEEK[])')
@@ -183,24 +204,33 @@ def poll():
    if not payload:raise ValueError('Empty message fetch; checkpoint retained')
    message=email.message_from_bytes(payload);message_id=message.get('Message-ID','').strip()
    mid=account+':'+hashlib.sha256((message_id or folder+'|'+str(validity)+'|'+str(numeric_uid)).encode()).hexdigest()[:32]
-   with store.connect() as c:seen=c.execute('SELECT 1 FROM email_updates WHERE id=?',(mid,)).fetchone()
-   if not seen:
-    subject=decode(message['Subject']);sender=decode(message['From']);body=message_body(message)
+   with store.connect() as c:seen=c.execute('SELECT payload,resolved FROM email_updates WHERE id=?',(mid,)).fetchone()
+   if not seen or recovery:
+    subject=decode(message['Subject']);sender=decode(message['From']);body=latest_message_text(message_body(message))
     decision=match_message(subject,sender,body,store.jobs()) if parseaddr(sender)[1].lower()!=user.lower() else Match('',reason='Outgoing email')
     if decision.certain and decision.reason=='Single recorded application for this employer':
      matched=next(j for j in store.jobs() if j['id']==decision.job_id)
      age=(datetime.fromisoformat(matched['created'])-datetime.fromisoformat(events.occurred_at({'date':decode(message['Date'])}))).total_seconds()
      if age>14*86400:decision.certain=False;decision.reason='Older employer-only email; confirm which role it belongs to'
-    record={'subject':subject[:300],'sender':sender[:300],'date':decode(message['Date'])[:100],'snippet':body[:30000] if decision.status else '', 'status':decision.status,'candidates':list(decision.candidates),'reason':decision.reason,'company':employer_from_email(subject,sender,body),'title':role_from_email(subject,body)}
+    previous=json.loads(seen['payload']) if seen else {}
+    changed=bool(seen) and previous.get('status','')!=decision.status
+    if seen and not changed:
+     store.set_setting(cursor_key,max(cursor,numeric_uid));store.set_setting(recovery_key+':cursor',numeric_uid);processed+=1;continue
+    if changed and previous.get('status') in ('Rejected','Offer','Withdrawn'):
+     decision.certain=False;decision.status=decision.status or previous['status'];decision.reason='Previously recorded terminal outcome needs review after updated email rules; check the current Sheet stage'
+    record={'requires_review':bool(changed and previous.get('status') in ('Rejected','Offer','Withdrawn')),'subject':subject[:300],'sender':sender[:300],'date':decode(message['Date'])[:100],'snippet':body[:30000] if decision.status else '', 'status':decision.status,'candidates':list(decision.candidates),'reason':decision.reason,'company':employer_from_email(subject,sender,body),'title':role_from_email(subject,body)}
     resolved='ignored' if not decision.status else ''
     if not decision.status:record={'status':'','reason':'Not an application update'}
-    with store.connect() as c:c.execute('INSERT OR IGNORE INTO email_updates VALUES(?,?,?,?)',(mid,json.dumps(record),resolved,store.now()))
+    with store.connect() as c:
+     if seen:c.execute('UPDATE email_updates SET payload=?,resolved=? WHERE id=?',(json.dumps(record),resolved,mid))
+     else:c.execute('INSERT OR IGNORE INTO email_updates VALUES(?,?,?,?)',(mid,json.dumps(record),resolved,store.now()))
     if decision.certain:
      job=next(j for j in store.jobs() if j['id']==decision.job_id);advance_update(mid,job,decision.status)
-   store.set_setting(cursor_key,numeric_uid);processed+=1
+   store.set_setting(cursor_key,max(cursor,numeric_uid));store.set_setting(recovery_key+':cursor',numeric_uid);processed+=1
    if processed%20==0:
     remaining=max(0,len(uids)-processed)
     store.set_setting('mail_health',{'connected':True,'last_checked':store.now(),'folder':folder.strip('"'),'remaining':remaining,'message':f'Processing mailbox without marking messages read. {remaining} messages remaining.'})
+  if recovery and len(uids)<=batch:store.set_setting(recovery_key,REJECTION_WORDING_REVISION);store.set_setting(recovery_key+':cursor',0)
   reconcile_updates();remaining=max(0,len(uids)-processed)
   store.set_setting('mail_health',{'connected':True,'last_checked':store.now(),'folder':folder.strip('"'),'remaining':remaining,'message':f'Mailbox checked without marking messages read. {remaining} messages awaiting the next batch.' if remaining else 'Mailbox checked without marking messages read. Uncertain matches await review.'})
  except (imaplib.IMAP4.error,OSError,ValueError):store.set_setting('mail_health',{'connected':False,'message':'Email check interrupted; saved checkpoints will retry automatically.','last_checked':store.now()})
