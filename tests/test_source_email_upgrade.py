@@ -103,12 +103,12 @@ class ApplicationRouteMatchingTests(unittest.TestCase):
   mail.apply_update('resume-evidence',jobid,'Interview');self.assertEqual(next(j for j in store.jobs() if j['id']==jobid)['status'],'Interview');self.assertEqual(len(store.application_events(jobid)),1)
 
 class AsdaEmployerFeedTests(unittest.TestCase):
- def test_known_reed_crosspost_is_merged_into_exact_employer_requisition(self):
+ def test_asda_direct_feed_does_not_reintroduce_excluded_reed_links(self):
   page={'total':1,'jobPostings':[{'title':'Finance Graduate Programme','locationsText':'Asda House','externalPath':'/job/Asda-House/Finance-Graduate-Programme_R-106204'}]}
   with patch('jobtrackr.discovery.requests.post') as post:
    post.return_value.json.return_value=page;row=discovery.asda()[0]
   self.assertEqual(row['company'],'Asda');self.assertIn('asda.wd103.myworkdayjobs.com',row['link']);self.assertEqual(normalization.vacancy_identity(row),'wd:asda:r-106204')
-  self.assertTrue(normalization.finance_same_listing(row,{'link':'https://www.reed.co.uk/jobs/finance-graduate-programme/57377624'}))
+  self.assertNotIn('reed.co.uk',str(row))
 
 class KpmgDistinctRouteTests(unittest.TestCase):
  def test_information_link_is_not_application_destination(self):

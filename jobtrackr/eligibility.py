@@ -12,7 +12,9 @@ CATEGORIES = {
 UK_WORDS=('united kingdom','england','scotland','wales','northern ireland','london','bristol','birmingham','manchester','leeds','nottingham','edinburgh','glasgow','reading','oxford','aylesbury','belfast','newcastle','cambridge','southampton','liverpool','leicester','milton keynes','sheffield','gatwick','crawley','aberdeen','cardiff','cheltenham','ipswich','guildford','norwich','dundee','exeter','brighton','rickmansworth','st albans','colchester','fakenham','diss')
 
 def evaluate(job, profile=None):
- p=profile or setting('profile');title=job.get('title','').lower();description=job.get('description','').lower();text=title+' '+description
+ p=dict(profile if profile is not None else setting('profile'));
+ if profile is None:p.update(setting('school_grades',{}))
+ title=job.get('title','').lower();description=job.get('description','').lower();text=title+' '+description
  reasons=[];unknown=[];reject=[]
  category=next((k for k,v in CATEGORIES.items() if any(re.search(r'\b'+re.escape(w),title) for w in v)),None)
  if not category and job.get('source')=='Accountancy Careers' and re.search(r'\b(graduate|trainee|aca|acca)\b',title):category='Accounting'
@@ -51,23 +53,18 @@ def evaluate(job, profile=None):
    have=p.get('a_level_points')
    if have is None:unknown.append('UCAS points requirement needs confirmation')
    elif int(have)<int(points.group(1)):reject.append('UCAS points below stated requirement')
-  if re.search(r'\b(?:three|3) a.levels?\b',sentence) and re.search(r'\b(?:a\*.?c|a.?c|grade|equivalent)\b',sentence) and not p.get('a_level_grades_confirmed'):
+  if not (re.search(r'\b(?:equivalent|btec|vocational)\b',sentence) and p.get('a_level_points') is not None) and re.search(r'\b(?:three|3) a.levels?\b',sentence) and re.search(r'\b(?:a\*.?c|a.?c|grade|equivalent)\b',sentence) and not p.get('a_level_grades_confirmed'):
    unknown.append('A-level grade requirement needs confirmation')
-  if 'gcse' in sentence and re.search(r'\b(require|minimum|must|need|grade)\b',sentence) and not re.search(r'\b(no minimum|not require)\b',sentence):
-   for subject in ('maths','english'):
-    if subject in sentence:
-     grade=str(p.get('gcse_'+subject,'')).strip().upper();minimum=re.search(r'grade\s*(\d)',sentence)
-     if not grade:unknown.append(f'GCSE {subject} requirement needs confirmation')
-     elif minimum and grade.isdigit() and int(grade)<int(minimum.group(1)):reject.append(f'GCSE {subject} grade below stated requirement')
-     elif minimum and not grade.isdigit():unknown.append(f'GCSE {subject} equivalent grade needs checking')
   years=re.search(r'(?:graduated|graduating|graduate)\s+(?:in|between|during)\s+(20\d\d)(?:\s*(?:and|to|[-–])\s*(20\d\d))?',sentence)
   if years:
    year=p.get('graduation_year')
    if not year:unknown.append('Graduation year restriction needs confirmation')
    elif not int(years.group(1))<=int(year)<=int(years.group(2) or years.group(1)):reject.append('Outside stated graduation window')
 
+ from .school_requirements import check
+ school_reject,school_unknown=check(description,p);reject.extend(school_reject);unknown.extend(school_unknown)
  # Job boards also advertise paid training packages as vacancies.
- if re.search(r'(training course and fees apply|course fees|one.off cost|refund.{0,30}(?:course|training)|job guarantee upon completion)',text):reject.append('Paid training package rather than an employed job')
+ if re.search(r'(training course and fees apply|course fees (?:apply|of|payable)|(?:you|candidates?|applicants?) (?:must |will |have to )?pay.{0,40}(?:course|training|fees)|one.off cost|refund.{0,30}(?:course|training)|job guarantee upon completion)',text):reject.append('Paid training package rather than an employed job')
  if re.search(r'(?:essential.{0,100}previous experience|previous experience.{0,100}(?:essential|required)|minimum.{0,15}\d+\s*months?.{0,50}experience|seeking an experienced)',text) and p.get('experience_years') is None:
   unknown.append('Relevant professional experience requirement needs confirmation')
  closing=deadline_date(job.get('deadline',''))
@@ -78,7 +75,7 @@ def evaluate(job, profile=None):
  if study:reasons.append('Professional study support mentioned')
  if p.get('relocate'):reasons.append('Nationwide relocation accepted')
  return {'state':'filtered' if reject else 'needs_check' if unknown else 'eligible', 'category':category or 'Other',
-  'reasons':list(dict.fromkeys(reasons)), 'requirements':list(dict.fromkeys(reject+unknown)), 'study_support':study,'score':70+20*study+10*early}
+  'reasons':list(dict.fromkeys(reasons)), 'requirements':list(dict.fromkeys(reject+unknown)), 'study_support':study,'score':70+20*study+10*early, 'school_requirements': 'Unconfirmed school requirements' if school_unknown else 'Below advertised GCSE minimum' if school_reject else 'No blocking GCSE requirement found in this advert'}
 
 
 def displayable(decision):

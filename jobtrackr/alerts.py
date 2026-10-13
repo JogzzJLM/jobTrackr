@@ -8,6 +8,7 @@ import hashlib
 import requests
 from datetime import date, datetime
 from . import store
+from .source_policy import visible_jobs,excluded
 LOCK=threading.RLock()
 
 def topic():return os.getenv('NTFY_TOPIC') or 'applicationtrackr_alerts_har'
@@ -24,6 +25,9 @@ def new_listings(jobs):
  groups={}
  with LOCK,store.connect() as c:
   for job in jobs:
+   if excluded(job):continue
+   from .eligibility import evaluate,displayable
+   if not displayable(evaluate(job)):continue
    if c.execute('SELECT 1 FROM outbox WHERE id=?',('listing:'+job['id'],)).fetchone():continue
    groups.setdefault(key(job),[]).append(job)
   for family,items in groups.items():
@@ -41,6 +45,10 @@ def flush():
   with store.connect() as c: pending=c.execute("SELECT * FROM outbox WHERE delivered IS NULL AND id NOT LIKE 'reminder:%' AND next_retry<=? ORDER BY rowid LIMIT 10",(time.time(),)).fetchall()
   for item in pending:
    payload=json.loads(item['payload'])
+   from .source_policy import blocked_url
+   if blocked_url(payload.get('url')):
+    with store.connect() as c:c.execute('UPDATE outbox SET delivered=? WHERE id=?',(store.now(),item['id']))
+    continue
    try:
     target=topic()
     if not re.fullmatch(r'[a-zA-Z0-9_-]{1,64}',target):raise ValueError('Invalid ntfy topic')
@@ -61,7 +69,7 @@ def scheduled():
  # Closing-date alerts use verified listings, never old personal reminders.
  from zoneinfo import ZoneInfo
  local=datetime.now(ZoneInfo('Europe/London'));today=local.date().isoformat()
- items=store.jobs()
+ items=visible_jobs(store.jobs())
  for job in items:
   deadline=job.get('deadline','')[:10]
   try:days=(date.fromisoformat(deadline)-local.date()).days

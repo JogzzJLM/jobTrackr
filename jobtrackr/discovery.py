@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 from . import store, alerts, network
+from .source_policy import excluded,blocked_url,sanitise
 from .eligibility import evaluate, displayable
 from .normalization import normalize_url, canonical_url, clean_company_display_name
 from .verifier import verify_listing, plain, deadline_date, application_link
@@ -98,10 +99,6 @@ def asda():
   r=requests.post('https://asda.wd103.myworkdayjobs.com/wday/cxs/asda/AsdaJobs/jobs',headers={**HEADERS,'Accept':'application/json'},json={'appliedFacets':{},'limit':20,'offset':offset,'searchText':'finance'},timeout=20);r.raise_for_status();page=r.json();items=page.get('jobPostings',[])
   for item in items:
    job=candidate('Asda',item['title'],item.get('locationsText',''),'https://asda.wd103.myworkdayjobs.com/AsdaJobs'+item['externalPath'],'Asda employer feed',country='GB')
-   # This exact cross-post was independently matched against Asda's published
-   # programme and requisition, not inferred from an agency's unnamed client.
-   if item['externalPath'].endswith('_R-106204'):
-    job['alternate_links']=['https://www.reed.co.uk/jobs/finance-graduate-programme/57377624']
    result.append(job)
   offset+=len(items)
   if not items or offset>=page.get('total',offset):break
@@ -125,12 +122,24 @@ def kpmg():
  return result
 
 
+def workday_employer(company,host,tenant,site,search=''):
+ """Employer-hosted Workday vacancies, paginated without an intermediary."""
+ result=[];offset=0
+ for _ in range(25):
+  r=requests.post(f'https://{host}/wday/cxs/{tenant}/{site}/jobs',headers={**HEADERS,'Accept':'application/json'},json={'appliedFacets':{},'limit':20,'offset':offset,'searchText':search},timeout=20)
+  r.raise_for_status();page=r.json();items=page.get('jobPostings',[])
+  for item in items:
+   result.append(candidate(company,item['title'],item.get('locationsText',''),f"https://{host}/{site}"+item['externalPath'],company+' employer feed',country='GB'))
+  offset+=len(items)
+  if not items or offset>=page.get('total',offset):break
+ return result
+
+
 def sources():
- return [('BDO employer feed',bdo_workday),('KPMG employer feed',kpmg),('Asda employer feed',asda),
+ return [('Grant Thornton employer feed',lambda:workday_employer('Grant Thornton','ukgrantt.wd3.myworkdayjobs.com','ukgrantt','TraineeCareersGrantThornton')),('Bishop Fleming employer feed',lambda:workday_employer('Bishop Fleming','bishopfleming.wd3.myworkdayjobs.com','bishopfleming','BF')),('BDO employer feed',bdo_workday),('KPMG employer feed',kpmg),('Asda employer feed',asda),
  ('Accountancy Careers',lambda:board('Accountancy Careers','https://www.accountancycareers.co.uk/search/jobs/',r'/jobs/[^/]+/',pages=5)),
  ('Graduate-jobs.com accounting',lambda:board('Graduate-jobs.com accounting','https://www.graduate-jobs.com/jobs/accounting',r'/job/',pages=5)),
  *[(f'Graduate-jobs.com {area}',lambda area=area:board(f'Graduate-jobs.com {area}',f'https://www.graduate-jobs.com/jobs/{area}',r'/job/',pages=5)) for area in ('finance','banking')],
- *[(f'Reed {area}',lambda area=area:board(f'Reed {area}',f'https://www.reed.co.uk/jobs/{area}-jobs',r'/jobs/[^/]+/\d+',pages=3)) for area in ('graduate-accountant','trainee-accountant','graduate-finance')],
  ('RSM employer feed',rsm),('Sanctuary graduates',lambda:board('Sanctuary graduates','https://jobs.sanctuarygraduates.co.uk/',r'/job/',pages=5)),
  ('ACCA Careers',lambda:board('ACCA Careers','https://jobs.accaglobal.com/jobs/united-kingdom/graduate/',r'/job/',pages=3)),
  ('DWP Find a job',lambda:board('DWP Find a job','https://findajob.dwp.gov.uk/search?q=trainee+accountant&w=UK',r'/details/',pages=3)),
@@ -138,6 +147,7 @@ def sources():
  *[(f'SmartRecruiters: {c}',lambda c=c:smart(c)) for c in ('EvelynPartners','ForvisMazars','Visa')]]
 
 def _enrich(job,force=False):
+ if excluded(job):return job,{'state':'filtered','reason':'Excluded source'}
  if evaluate(job)['state']=='filtered':return job,{'state':'filtered','reason':'Role or seniority outside profile'}
  check=verify_listing(job.get('verification_url') or job['link'],job['title'],force=force)
  # RSM public index/detail is employer evidence, even though its static page labels
@@ -161,6 +171,7 @@ def _enrich(job,force=False):
    if description and employer and applies and job['title'].lower() in title and len(content)>300 and not re.search(r'(vacancy (?:has )?closed|no longer accepting|applications (?:have )?closed)',content,re.I):
     check={'state':'verified','reason':'Specific accountancy vacancy, employer, full description and apply control','checked_at':store.now(),'description':content,'final_url':job['link'],'apply_url':application_link(soup,job['link'])}
   except requests.RequestException:pass
+ if blocked_url(check.get('final_url')) or blocked_url(check.get('apply_url')):return job,{'state':'filtered','reason':'Excluded source destination'}
  if check['state']!='verified':return job,check
  if job['source']=='Sanctuary graduates':
   try:
@@ -221,6 +232,7 @@ def _enrich(job,force=False):
 
 _ENRICH_CACHE_LOCK=threading.RLock()
 def enrich(job,force=False):
+ if excluded(job):return job,{'state':'filtered','reason':'Excluded source'}
  cache_path=store.DATA_DIR/'enriched_listings.json';key=job['link']
  with _ENRICH_CACHE_LOCK:cached=store.load_json_safe(cache_path,{}).get(key)
  if cached and not force and cached.get('version')==3 and not (job.get('source')=='KPMG employer feed' and not cached.get('job',{}).get('location')):
@@ -238,7 +250,7 @@ def scan():
  if not SCAN_LOCK.acquire(blocking=False):return False
  known_ids={j['id'] for j in store.jobs()};started=time.time();health={};new=0;checked=0;record_errors=[];new_jobs=[]
  def save_listing(job):
-  try:return store.upsert(job)
+  try:return store.upsert(sanitise(job))
   except Exception as exc:
    record_errors.append({'id':job.get('id',''),'error':type(exc).__name__});return False
  try:
@@ -249,7 +261,7 @@ def scan():
    for future in concurrent.futures.as_completed(futures):
     name=futures[future]
     try:
-     rows=list({normalize_url(j['link']):j for j in future.result() if j.get('link')}.values());rows=[{**j,'feed_name':name} for j in rows];candidates.extend(rows);health[name]={'ok':True,'candidates':len(rows),'relevant_candidates':sum(evaluate(j)['state']!='filtered' for j in rows),'verified':0,'unconfirmed':0,'closed':0,'filtered':sum(evaluate(j)['state']=='filtered' for j in rows),'checked_at':store.now()}
+     rows=list({normalize_url(j['link']):j for j in future.result() if j.get('link') and not excluded(j)}.values());rows=[{**j,'feed_name':name} for j in rows];candidates.extend(rows);health[name]={'ok':True,'candidates':len(rows),'relevant_candidates':sum(evaluate(j)['state']!='filtered' for j in rows),'verified':0,'unconfirmed':0,'closed':0,'filtered':sum(evaluate(j)['state']=='filtered' for j in rows),'checked_at':store.now()}
     except Exception as exc:health[name]={'ok':False,'error':f'Feed unavailable ({type(exc).__name__}); will retry','checked_at':store.now()}
   store.set_setting('sources',health)
   # Imported legacy jobs are candidates only: never shown as verified blindly.
@@ -259,13 +271,14 @@ def scan():
      candidates.append(candidate(old.get('company',''),old.get('title',''),old.get('location',''),old.get('link',''), 'Legacy import',old.get('description') or old.get('metadata',{}).get('description','')))
    store.set_setting('legacy_reviewed',True)
   for existing in store.jobs():
+   if excluded(existing):continue
    decision=evaluate(existing)
    if not displayable(decision):
     existing['verification']={'state':decision['state'],'reason':'; '.join(decision['requirements']),'checked_at':store.now()};save_listing(existing)
   candidates.extend({k:v for k,v in j.items() if k not in ('status','notes','reminder','created','updated')} for j in store.jobs() if j.get('link'))
   unique={}
   for j in candidates:
-   if not j.get('link') or evaluate(j)['state']=='filtered':continue
+   if excluded(j) or not j.get('link') or evaluate(j)['state']=='filtered':continue
    key=normalize_url(j['link']);previous=unique.get(key,{})
    unique[key]={**j,**({'feed_name':previous['feed_name']} if previous.get('feed_name') else {})}
   with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:

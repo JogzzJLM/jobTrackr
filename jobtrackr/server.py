@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from . import store, discovery, alerts, mail, sheets, flow
 from .eligibility import evaluate, displayable
+from .source_policy import visible_jobs
 from .verifier import deadline_date
 from datetime import date
 from .verifier import verify_listing
@@ -27,7 +28,7 @@ class Handler(BaseHTTPRequestHandler):
   if path in ('/assets/style.css','/assets/app.js','/assets/groups.js','/assets/themes.js'):
    return self.reply((ROOT/path.split('/')[-1]).read_bytes(),mime='text/css; charset=utf-8' if path.endswith('.css') else 'text/javascript; charset=utf-8')
   if path=='/api/state':
-   data={'jobs':[{k:v for k,v in job.items() if k not in ('notes','reminder','description')} for job in store.jobs() if job['status'] not in ('New','Saved') or not deadline_date(job.get('deadline')) or deadline_date(job['deadline'])>=date.today()],'scan':store.setting('scan',{}),'last_successful_scan':store.setting('last_successful_scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'colour_profile':store.setting('colour_profile','ocean'),'scan_interval':discovery.SCAN_INTERVAL,'health':__import__('jobtrackr.health',fromlist=['health']).health(),'sheet_url':sheets.edit_url(),'flow_version':hashlib.sha256(json.dumps((store.setting('sheet_rows') or sheets.snapshot()),sort_keys=True).encode()).hexdigest()[:12],'sheets':store.setting('sheet_health',{})}
+   data={'jobs':[{k:v for k,v in job.items() if k not in ('notes','reminder','description')} for job in visible_jobs(store.jobs()) if job['status'] not in ('New','Saved') or not deadline_date(job.get('deadline')) or deadline_date(job['deadline'])>=date.today()],'scan':store.setting('scan',{}),'last_successful_scan':store.setting('last_successful_scan',{}),'sources':store.setting('sources',{}),'notifications':store.setting('notification_health',{}),'mail':store.setting('mail_health',{'connected':False,'message':'Not connected'}),'email_updates':mail.updates(),'topic':alerts.topic(),'statuses':[s for s in store.STATUSES if s!='Saved'],'colour_profile':store.setting('colour_profile','ocean'),'scan_interval':discovery.SCAN_INTERVAL,'health':__import__('jobtrackr.health',fromlist=['health']).health(),'sheet_url':sheets.edit_url(),'flow_version':hashlib.sha256(json.dumps((store.setting('sheet_rows') or sheets.snapshot()),sort_keys=True).encode()).hexdigest()[:12],'sheets':store.setting('sheet_health',{})}
    with store.connect() as c:data['pending_notifications']=c.execute("SELECT COUNT(*) FROM outbox WHERE delivered IS NULL AND id NOT LIKE 'reminder:%'").fetchone()[0]
    return self.reply(data)
   if path=='/sankey-embed':return self.reply(flow.html(),mime='text/html; charset=utf-8')
@@ -45,7 +46,7 @@ class Handler(BaseHTTPRequestHandler):
   if path.startswith('/api/history/'):
    return self.reply(store.history(path.rsplit('/',1)[-1]))
   if path=='/api/export':
-   output=io.StringIO();writer=csv.DictWriter(output,fieldnames=['company','title','location','link','status','deadline','source','created','updated'],extrasaction='ignore');writer.writeheader();scope=__import__('urllib.parse',fromlist=['parse_qs']).parse_qs(urlparse(self.path).query).get('scope',['all'])[0];writer.writerows(j for j in store.jobs() if scope!='applications' or j['status'] in mail.APPLICATION_STAGES)
+   output=io.StringIO();writer=csv.DictWriter(output,fieldnames=['company','title','location','link','status','deadline','source','created','updated'],extrasaction='ignore');writer.writeheader();scope=__import__('urllib.parse',fromlist=['parse_qs']).parse_qs(urlparse(self.path).query).get('scope',['all'])[0];writer.writerows(j for j in visible_jobs(store.jobs()) if scope!='applications' or j['status'] in mail.APPLICATION_STAGES)
    return self.reply(output.getvalue(),mime='text/csv; charset=utf-8')
   self.reply({'error':'Not found'},404)
  def do_POST(self):
@@ -56,6 +57,13 @@ class Handler(BaseHTTPRequestHandler):
    if not 0<size<=100000:return self.reply({'error':'Invalid request size'},400)
    data=json.loads(self.rfile.read(size));path=urlparse(self.path).path
    if path=='/api/job':store.update_job(str(data.get('id','')),{'status':data['status']})
+   elif path=='/api/eligibility-profile':
+    allowed={'gcse_maths','gcse_english','gcse_english_literature','a_level_points','post16_qualification'}
+    if not data or set(data)-allowed:raise ValueError('Unsupported eligibility detail')
+    for key in ('gcse_maths','gcse_english','gcse_english_literature'):
+     if key in data and (not str(data[key]).isdigit() or not 1<=int(data[key])<=9):raise ValueError('GCSE grades must be 1–9')
+    if 'a_level_points' in data and (not isinstance(data['a_level_points'],int) or not 0<=data['a_level_points']<=500):raise ValueError('Invalid UCAS points')
+    saved=store.setting('school_grades',{});saved.update(data);store.set_setting('school_grades',saved)
    elif path=='/api/colour':
     colour=data.get('colour')
     if colour not in ('ocean','forest','berry','sunset'):raise ValueError('Choose a valid colour profile')
