@@ -62,3 +62,18 @@ class EmployerFeedTests(unittest.TestCase):
   with patch('jobtrackr.store.setting',side_effect=lambda k,d=None:store.DEFAULT_PROFILE if k=='profile' else {}):
    visible_jobs([job]);visible_jobs([{**job,'updated':'2026-10-13T21:00:00'}])
   self.assertEqual(_decision.cache_info().hits,1)
+
+ def test_deduplication_does_not_compare_every_unrelated_job_pair(self):
+  from jobtrackr import normalization
+  jobs=[{'company':'Employer '+str(i),'title':'Finance Assistant','location':'London','link':'https://example.org/jobs/'+str(i)} for i in range(500)]
+  with patch('jobtrackr.normalization.finance_same_listing',wraps=normalization.finance_same_listing) as compare:
+   self.assertEqual(len(normalization.collapse_finance_jobs(jobs)),500)
+   self.assertLess(compare.call_count,1000)
+ def test_deduplication_preserves_shared_destinations_with_different_employer_labels(self):
+  from jobtrackr.normalization import collapse_finance_jobs
+  jobs=[{'company':'Employer','title':'Finance Assistant','location':'London','link':'https://example.org/jobs/123'},{'company':'Different label','title':'Finance Assistant','location':'London','link':'https://example.org/jobs/123'}]
+  self.assertEqual(len(collapse_finance_jobs(jobs)),1)
+ def test_deduplication_preserves_transitive_alternate_destinations(self):
+  from jobtrackr.normalization import collapse_finance_jobs
+  jobs=[{'company':'Firm','title':'Finance Assistant','location':'London','link':'https://example.org/jobs/1'}, {'company':'Firm','title':'Finance Assistant','location':'London','link':'https://example.org/jobs/1','alternate_links':['https://example.org/jobs/2']}, {'company':'Firm','title':'Finance Assistant','location':'London','link':'https://example.org/jobs/2'}]
+  self.assertEqual(len(collapse_finance_jobs(jobs)),1)

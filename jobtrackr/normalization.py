@@ -359,12 +359,25 @@ def finance_same_listing(a,b):
     return len(text_a)>300 and text_a==text_b and a.get('salary','')==b.get('salary','')
 
 def collapse_finance_jobs(jobs):
-    groups=[]
+    # Restrict comparisons to records that can satisfy finance_same_listing:
+    # shared destination/native ID, or identical employer/title/location.
+    groups=[];link_index={};native_index={};role_index={}
     def priority(job):return (job.get('status') not in ('New','Saved','Dismissed'),job.get('route_type')=='Direct employer',bool(job.get('apply_url')))
+    def words(value):return re.sub(r'[^a-z0-9]+',' ',str(value or '').lower()).strip()
     for job in sorted(jobs,key=priority,reverse=True):
-        duplicate=next((other for other in groups if finance_same_listing(job,other)),None)
-        if duplicate:
-            duplicate.setdefault('alternate_links',[])
+        links={listing_link_key(url) for url in listing_links(job) if url}
+        native=vacancy_identity(job)
+        role=(normalize_company(job.get('company')),words(job.get('title')),words(job.get('location')))
+        candidates=set(role_index.get(role,()))
+        for link in links:candidates.update(link_index.get(link,()))
+        if native:candidates.update(native_index.get(native,()))
+        match=next((i for i in sorted(candidates) if finance_same_listing(job,groups[i])),None)
+        if match is None:
+            match=len(groups);groups.append(dict(job))
+        else:
+            duplicate=groups[match];duplicate.setdefault('alternate_links',[])
             duplicate['alternate_links']=list(dict.fromkeys(duplicate['alternate_links']+[job.get('link','')]+job.get('alternate_links',[])))
-        else:groups.append(dict(job))
+        for link in links:link_index.setdefault(link,set()).add(match)
+        if native:native_index.setdefault(native,set()).add(match)
+        role_index.setdefault(role,set()).add(match)
     return groups
