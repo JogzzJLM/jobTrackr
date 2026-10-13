@@ -122,6 +122,23 @@ def _workday(url):
                    published_at=info.get('startDate', ''), final_url=url)
 
 
+def _oracle(url):
+    parsed=urlparse(url)
+    if not parsed.hostname or not parsed.hostname.endswith('.oraclecloud.com'):return None
+    match=re.search(r'/CandidateExperience/[^/]+/sites/[^/]+/job/(\d+)',parsed.path)
+    if not match:return None
+    response=network.get(f'https://{parsed.hostname}/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails/{match[1]}?onlyData=true',headers={**HEADERS,'Accept':'application/json'},timeout=10)
+    if response.status_code in (404,410):return _result('closed','Employer requisition removed')
+    if response.status_code!=200:return None
+    data=response.json()
+    if str(data.get('Id'))!=match[1] or not data.get('Title'):return None
+    description=plain(' '.join(data.get(k) or '' for k in ('ExternalDescriptionStr','ExternalQualificationsStr','ExternalResponsibilitiesStr')))
+    if not description:return None
+    deadline=deadline_date(data.get('ExternalPostedEndDate'))
+    if deadline and deadline<date.today():return _result('closed','Employer application deadline passed')
+    return _result('verified','Employer Oracle requisition detail',title=data['Title'],description=description,location=data.get('PrimaryLocation',''),country=data.get('PrimaryLocationCountry',''),closing_date=data.get('ExternalPostedEndDate') or '',published_at=data.get('ExternalPostedStartDate') or '',requisition_id=match[1],final_url=url)
+
+
 def title_matches(expected, actual):
     if not expected: return True
     def tokens(value):
@@ -142,6 +159,9 @@ def _check(url, expected_title=''):
     if re.fullmatch(r'/hub/\d+/[^/]+/?', parsed.path) or parsed.path.rstrip('/') in {'', '/jobs', '/careers', '/search-jobs'}:
         return _result('unknown', 'Employer/search portal rather than a specific job')
     try:
+        oracle = _oracle(url)
+        if oracle:
+            return oracle if oracle['state']=='closed' or title_matches(expected_title,oracle.get('title','')) else _result('unknown','Employer detail title does not match the requested job')
         wd = _workday(url)
         if wd:
             return wd if title_matches(expected_title, wd.get('title', '')) else _result('unknown', 'Employer detail title does not match the requested job')

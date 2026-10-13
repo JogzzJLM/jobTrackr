@@ -17,8 +17,8 @@ SCAN_INTERVAL=max(300,int(os.getenv("SCRAPER_INTERVAL_SECONDS","300")))
 SCAN_LOCK=threading.Lock()
 HEADERS={'User-Agent':'Mozilla/5.0','Accept':'text/html,application/xhtml+xml'}
 
-def get(url):
- r=network.get(url,headers=HEADERS,timeout=20);r.raise_for_status();return r
+def get(url,accept=None):
+ r=network.get(url,headers={**HEADERS,**({'Accept':accept} if accept else {})},timeout=20);r.raise_for_status();return r
 
 def candidate(company,title,location,link,source,description='',**extra):
  return {'company':clean_company_display_name(company) if company else '', 'title':title,'location':location,'link':canonical_url(link),'source':source,'description':plain(description),**extra}
@@ -122,21 +122,22 @@ def kpmg():
  return result
 
 
-def workday_employer(company,host,tenant,site,search=''):
+def workday_employer(company,host,tenant,site,search='',country='GB'):
  """Employer-hosted Workday vacancies, paginated without an intermediary."""
  result=[];offset=0
  for _ in range(25):
   r=requests.post(f'https://{host}/wday/cxs/{tenant}/{site}/jobs',headers={**HEADERS,'Accept':'application/json'},json={'appliedFacets':{},'limit':20,'offset':offset,'searchText':search},timeout=20)
   r.raise_for_status();page=r.json();items=page.get('jobPostings',[])
   for item in items:
-   result.append(candidate(company,item['title'],item.get('locationsText',''),f"https://{host}/{site}"+item['externalPath'],company+' employer feed',country='GB'))
+   result.append(candidate(company,item['title'],item.get('locationsText',''),f"https://{host}/{site}"+item['externalPath'],company+' employer feed',country=country))
   offset+=len(items)
   if not items or offset>=page.get('total',offset):break
  return result
 
 
 def sources():
- return [('Grant Thornton employer feed',lambda:workday_employer('Grant Thornton','ukgrantt.wd3.myworkdayjobs.com','ukgrantt','TraineeCareersGrantThornton')),('Bishop Fleming employer feed',lambda:workday_employer('Bishop Fleming','bishopfleming.wd3.myworkdayjobs.com','bishopfleming','BF')),('BDO employer feed',bdo_workday),('KPMG employer feed',kpmg),('Asda employer feed',asda),
+ from .employer_feeds import sources as employer_sources
+ return [*employer_sources(),('Grant Thornton employer feed',lambda:workday_employer('Grant Thornton','ukgrantt.wd3.myworkdayjobs.com','ukgrantt','TraineeCareersGrantThornton')),('Bishop Fleming employer feed',lambda:workday_employer('Bishop Fleming','bishopfleming.wd3.myworkdayjobs.com','bishopfleming','BF')),('BDO employer feed',bdo_workday),('KPMG employer feed',kpmg),('Asda employer feed',asda),
  ('Accountancy Careers',lambda:board('Accountancy Careers','https://www.accountancycareers.co.uk/search/jobs/',r'/jobs/[^/]+/',pages=5)),
  ('Graduate-jobs.com accounting',lambda:board('Graduate-jobs.com accounting','https://www.graduate-jobs.com/jobs/accounting',r'/job/',pages=5)),
  *[(f'Graduate-jobs.com {area}',lambda area=area:board(f'Graduate-jobs.com {area}',f'https://www.graduate-jobs.com/jobs/{area}',r'/job/',pages=5)) for area in ('finance','banking')],

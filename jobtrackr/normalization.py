@@ -7,7 +7,7 @@ FINANCE_NAMES = {'pwc': 'PwC', 'pricewaterhousecoopers': 'PwC', 'bdo': 'BDO',
  'deloitte': 'Deloitte', 'grantthornton': 'Grant Thornton',
  'forvismazars': 'Forvis Mazars', 'mazars': 'Forvis Mazars',
  'evelynpartners': 'Evelyn Partners', 'monzo': 'Monzo', 'wise': 'Wise',
- 'deliveroo': 'Deliveroo', 'visa': 'Visa', 'acca': 'ACCA'}
+ 'deliveroo': 'Deliveroo', 'visa': 'Visa', 'acca': 'ACCA', 'bkl':'BKL', 'next':'NEXT', 'haysmac':'HaysMac', 'menzies':'Menzies', 'gocardless':'GoCardless', 'tide':'Tide', 'fidelityinternational':'Fidelity International'}
 
 COMPANY_ALIASES = {
     "mwinternshipprogram": "marshallwace",
@@ -94,6 +94,7 @@ def clean_company_display_name(name):
     cleaned = re.sub(r'([a-z])([A-Z])', r'\1 \2', cleaned)
     cleaned = cleaned.replace('-', ' ').replace('_', ' ')
     cleaned = ' '.join(word.capitalize() for word in cleaned.split())
+    cleaned=re.sub(r'\b(?:Nhs|Icb|Llp|Uk)\b',lambda m:m.group().upper(),cleaned)
     return cleaned if cleaned else name
 
 def normalize_company(name):

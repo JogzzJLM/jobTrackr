@@ -5,7 +5,7 @@ from .verifier import deadline_date
 from datetime import date
 
 CATEGORIES = {
- 'Accounting': ('accountant','accounting','accounts assistant','accounts payable','accounts receivable','bookkeep','purchase ledger','sales ledger','assistant accountant'),
+ 'Accounting': ('accountant','accounting','accounts assistant','accounts payable','accounts receivable','bookkeep','purchase ledger','sales ledger','assistant accountant','credit control','cash allocation'),
  'Audit': ('audit','assurance'), 'Tax': ('tax','taxation'),
  'Finance': ('finance','financial analyst','financial planning','fp&a','treasury','credit analyst','investment analyst','risk analyst','banking','wealth management','portfolio analyst','valuation'),
  'Payroll': ('payroll',)}
@@ -19,15 +19,15 @@ def evaluate(job, profile=None):
  category=next((k for k,v in CATEGORIES.items() if any(re.search(r'\b'+re.escape(w),title) for w in v)),None)
  if not category and job.get('source')=='Accountancy Careers' and re.search(r'\b(graduate|trainee|aca|acca)\b',title):category='Accounting'
  if not category:reject.append('Role is outside accounting and finance')
- if re.search(r'\b(senior|manager|director|head of|principal|chief|controller|lead)\b',title):reject.append('Experienced or leadership role')
+ if re.search(r'\b(senior|manager|director|head of|principal|chief|lead)\b',title) or (re.search(r'\bcontroller\b',title) and not re.search(r'\bcredit controller\b',title)):reject.append('Experienced or leadership role')
  if re.search(r'\b(placement|school leaver|insight|penultimate|undergraduate internship|summer intern)\b',title):reject.append('Student or school-leaver programme')
- if re.search(r'\b(sales|recruiter|software|developer|engineer|actuarial)\b',title):reject.append('Outside graduate accounting and finance scope')
+ if re.search(r'\b(recruiter|software|developer|engineer|actuarial)\b',title) or ('sales' in title and 'sales ledger' not in title):reject.append('Outside graduate accounting and finance scope')
  loc=(job.get('location','')+' '+job.get('country','')).lower()
  country=job.get('country','').strip().lower()
  if country and country not in ('gb','gbr','uk','united kingdom','england','scotland','wales','northern ireland'):reject.append('Role is outside the UK')
  elif re.search(r'\b(united states|usa|canada|australia|germany|france|netherlands|singapore|dubai|new york)\b',loc):reject.append('Role is outside the UK')
  if not (re.search(r'\b(uk|gb|gbr)\b',loc) or any(w in loc for w in UK_WORDS)):unknown.append('UK location not confirmed')
- early=bool(re.search(r'\b(graduate|trainee|junior|entry.level|assistant|apprentice|apprenticeship)\b',title))
+ early=bool(re.search(r'\b(graduate|trainee|junior|entry.level|assistant|apprentice|apprenticeship|clerk|administrator|credit controller|bookkeeper)\b',title))
  if not early and not re.search(r'\b(no (?:prior )?experience|entry.level|recent graduate|full training|graduates welcome)\b',description):unknown.append('Entry-level suitability not confirmed')
  # Requirements are detected in sentences, rather than incidental words such as “qualified colleagues”.
  for sentence in re.split(r'[.!?\n;]',description):
