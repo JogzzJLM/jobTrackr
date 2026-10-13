@@ -15,12 +15,14 @@ def sanitise(job):
 
 def visible_jobs(jobs):
  from .eligibility import evaluate,displayable
+ from .store import setting
+ profile=dict(setting('profile'));profile.update(setting('school_grades',{}))
  result=[]
  for job in jobs:
   tracked=job.get('status') in APPLICATION_STAGES
   if excluded(job) and not tracked:continue
   if not tracked:
-   decision=evaluate(job)
+   decision=evaluate(job,profile)
    if not displayable(decision):continue
    job={**job,**decision}
   result.append(sanitise(job))

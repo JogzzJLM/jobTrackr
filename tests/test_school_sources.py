@@ -55,3 +55,8 @@ class SchoolSourceTests(unittest.TestCase):
  def test_employer_funded_course_fees_are_not_paid_training_adverts(self):
   self.assertEqual(evaluate(self.job('A fully-funded professional qualification, paid study leave and all course fees covered.'),self.profile)['state'],'eligible')
   self.assertEqual(evaluate(self.job('You must pay course fees of £1,000 before placement.'),self.profile)['state'],'filtered')
+
+ def test_filter_reads_private_qualifications_once_for_the_whole_page(self):
+  with patch('jobtrackr.store.setting',side_effect=lambda key,default=None:self.profile if key=='profile' else {}) as setting:
+   self.assertEqual(len(visible_jobs([self.job(id=str(i)) for i in range(100)])),100)
+   self.assertEqual(setting.call_count,2)
