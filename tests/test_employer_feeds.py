@@ -43,3 +43,22 @@ class EmployerFeedTests(unittest.TestCase):
   self.assertEqual(result['state'],'needs_check');self.assertIn('experience',str(result['requirements']))
  def test_financial_controller_is_still_an_experienced_role(self):
   self.assertEqual(evaluate({'title':'Financial Controller','location':'London'},store.DEFAULT_PROFILE)['state'],'filtered')
+
+ def test_cached_eligibility_changes_when_saved_grades_change(self):
+  from jobtrackr.source_policy import visible_jobs
+  job={'title':'Finance Assistant','location':'London','description':'GCSE English grade 4 required.','status':'New'}
+  with patch('jobtrackr.store.setting',side_effect=lambda k,d=None:{**store.DEFAULT_PROFILE,'gcse_english':'4'} if k=='profile' else {}):self.assertEqual(len(visible_jobs([job])),1)
+  with patch('jobtrackr.store.setting',side_effect=lambda k,d=None:{**store.DEFAULT_PROFILE,'gcse_english':'3'} if k=='profile' else {}):self.assertEqual(visible_jobs([job]),[])
+ def test_cached_eligibility_changes_when_employer_requirements_change(self):
+  from jobtrackr.source_policy import visible_jobs
+  job={'title':'Finance Assistant','location':'London','description':'Full training','status':'New'}
+  with patch('jobtrackr.store.setting',side_effect=lambda k,d=None:store.DEFAULT_PROFILE if k=='profile' else {}):
+   self.assertEqual(len(visible_jobs([job])),1)
+   self.assertEqual(visible_jobs([{**job,'description':'Minimum 3 years experience required.'}]),[])
+ def test_cached_eligibility_is_reused_when_only_verification_time_changes(self):
+  from jobtrackr.source_policy import visible_jobs,_decision
+  job={'title':'Finance Administrator','location':'London','description':'Full training cache regression unique','status':'New'}
+  _decision.cache_clear()
+  with patch('jobtrackr.store.setting',side_effect=lambda k,d=None:store.DEFAULT_PROFILE if k=='profile' else {}):
+   visible_jobs([job]);visible_jobs([{**job,'updated':'2026-10-13T21:00:00'}])
+  self.assertEqual(_decision.cache_info().hits,1)
